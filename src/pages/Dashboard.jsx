@@ -9,7 +9,7 @@ import { Cat } from '../components/Cat';
 import { inr, qty, prettyMonth, shortMonth, currentMonthKey, todayISO } from '../lib/format';
 
 // Only these categories appear on the dashboard.
-const DASH_CATEGORIES = ['grocery', 'vegetable', 'tomato'];
+
 
 // Tiny inline price-trend line for an item's rate history.
 function Sparkline({ values, color = '#4f7a34', width = 84, height = 22 }) {
@@ -49,15 +49,8 @@ export default function Dashboard() {
   const [moveThreshold, setMoveThreshold] = useState(20);
   const [allBills, setAllBills] = useState([]);
 
-  // Is this category one of the three we show? Match by key or name (case-insensitive).
-  const isAllowed = useMemo(() => {
-    return (catKey) => {
-      const k = String(catKey || '').toLowerCase();
-      if (DASH_CATEGORIES.includes(k)) return true;
-      const nm = String(cats.name(catKey) || '').toLowerCase();
-      return DASH_CATEGORIES.some((a) => k.includes(a) || nm.includes(a));
-    };
-  }, [cats]);
+  // Show every category on the dashboard (no restriction).
+  const isAllowed = useMemo(() => () => true, []);
 
   useEffect(() => {
     (async () => {
@@ -276,7 +269,7 @@ export default function Dashboard() {
             {allMovers.length === 0 ? (
               <div className="muted" style={{ fontSize: 13 }}>Not enough data yet — an item needs at least two priced purchases before a change can be shown. Enter more bills and movers will appear here.</div>
             ) : priceMovers.length === 0 ? (
-              <div className="muted" style={{ fontSize: 13 }}>No grocery, vegetable or tomato item has moved {thr}% or more. Lower the % above to see smaller movements ({allMovers.length} item{allMovers.length === 1 ? '' : 's'} tracked).</div>
+              <div className="muted" style={{ fontSize: 13 }}>No item has moved {thr}% or more. Lower the % above to see smaller movements ({allMovers.length} item{allMovers.length === 1 ? '' : 's'} tracked).</div>
             ) : (
               <>
                 <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{priceMovers.length} of {allMovers.length} tracked item{allMovers.length === 1 ? '' : 's'} moved {thr}% or more since first purchase.{priceMovers.length > 25 ? ' Chart shows the top 25; full list in the table below.' : ''}</div>

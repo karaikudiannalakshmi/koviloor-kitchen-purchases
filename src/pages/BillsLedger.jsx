@@ -42,7 +42,10 @@ export default function BillsLedger() {
 function MonthView({ setView }) {
   const nav = useNavigate();
   const cats = useCategories();
-  const [month, setMonth] = useState(currentMonthKey());
+  const [params] = useSearchParams();
+  const [month, setMonth] = useState(params.get('month') || currentMonthKey());
+  const [sel, setSel] = useState(() => new Set());
+  const [printMode, setPrintMode] = useState(null); // { scope:'all'|'selected', kind:'combined'|'individual' }
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openVendor, setOpenVendor] = useState({});
@@ -98,9 +101,9 @@ function MonthView({ setView }) {
     };
   }
 
-  // Vendor summary (one row per vendor) for the certified ledger — print & PDF.
-  function vendorSummary() {
-    const sorted = [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
+  // Vendor summary (one row per vendor) for the certified ledger — print & PDF. Works on any subset.
+  function vendorSummary(gs) {
+    const sorted = [...gs].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
     const rows = sorted.map((g) => {
       const catNames = [...new Set((g.bills || []).flatMap((b) => (b.items || []).map((it) => cats.name(it.category))))];
       return {
@@ -116,13 +119,15 @@ function MonthView({ setView }) {
       { header: 'Bills', key: 'bills', align: 'right' },
       { header: 'Amount (₹)', key: 'amount', align: 'right' },
     ];
-    const total = { vendor: 'TOTAL BILLS', category: '', bills: totals.bills, amount: inr(totals.amount) };
+    const sumBills = sorted.reduce((s, g) => s + g.billCount, 0);
+    const sumAmt = sorted.reduce((s, g) => s + g.totalAmount, 0);
+    const total = { vendor: 'TOTAL BILLS', category: '', bills: sumBills, amount: inr(sumAmt) };
     return { columns, rows, total };
   }
 
-  // Date-wise bills under each vendor for the certified ledger detail section.
-  function vendorDetail() {
-    const sorted = [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
+  // Date-wise bills under each vendor for the certified ledger detail section. Works on any subset.
+  function vendorDetail(gs) {
+    const sorted = [...gs].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
     const columns = [
       { header: 'Date', key: 'date' },
       { header: 'Bill No', key: 'billNo' },
@@ -156,16 +161,59 @@ function MonthView({ setView }) {
     load();
   }
 
-  const summary = vendorSummary();
+  const selectedGroups = groups.filter((g) => sel.has(g.vendorName));
+  const individualGroups = sel.size ? selectedGroups : groups;
+  const combinedGroups = printMode?.scope === 'selected' ? selectedGroups : groups;
+  const cSummary = vendorSummary(combinedGroups);
+
+  function toggleSel(name) {
+    setSel((prev) => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  }
+  const allSelected = groups.length > 0 && sel.size === groups.length;
+  function selectAll() { setSel(new Set(groups.map((g) => g.vendorName))); }
+  function selectNone() { setSel(new Set()); }
+
+  useEffect(() => {
+    if (!printMode) return undefined;
+    const cls = printMode.kind === 'individual' ? 'printing-individual' : 'printing-certified';
+    const t = setTimeout(async () => {
+      const { printCertified } = await import('../lib/exporters');
+      printCertified(cls);
+      setPrintMode(null);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [printMode]);
+
+  async function doExcel() {
+    const { exportExcel } = await import('../lib/exporters');
+    exportExcel(`koviloor-bills-${month}`, buildExport().sheets);
+  }
+  async function doPDF() {
+    const { exportElementPDF } = await import('../lib/exporters');
+    await exportElementPDF(document.getElementById('ps-bills'), `koviloor-bills-${month}`);
+  }
 
   return (
     <>
-      <PrintSheet id="ps-bills" title="Certified Purchase Bills" period={prettyMonth(month)} columns={summary.columns} rows={summary.rows} total={summary.total} detail={vendorDetail()} />
+      <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} detail={vendorDetail(combinedGroups)} />
+
+      <div className="print-individual-wrap">
+        {individualGroups.map((g, i) => {
+          const sv = vendorSummary([g]); const dv = vendorDetail([g]);
+          return <PrintSheet key={g.vendorName} id={`ps-vendor-${i}`} title="Vendor Payment Statement" period={`${prettyMonth(month)} · ${g.vendorName}`} columns={sv.columns} rows={sv.rows} total={sv.total} detail={dv} />;
+        })}
+      </div>
 
       <div className="page-head" style={{ marginBottom: 18 }}>
         <div className="sub">{prettyMonth(month)} · {totals.bills} bills · {inr(totals.amount)}</div>
         <div className="row" style={{ alignItems: 'flex-end' }}>
-          <ReportActions filename={`KAL-bills-${month}`} printSheetId="ps-bills" excelSheets={buildExport().sheets} disabled={loading || groups.length === 0} />
+          <div className="report-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => setPrintMode({ scope: 'all', kind: 'combined' })} disabled={loading || groups.length === 0}>🖨 Print all</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setPrintMode({ scope: 'selected', kind: 'combined' })} disabled={sel.size === 0} title="One sheet with only the ticked vendors">🖨 Print selected ({sel.size})</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setPrintMode({ scope: 'selected', kind: 'individual' })} disabled={sel.size === 0} title="A separate sheet per ticked vendor">🖨 Each separately</button>
+            <button className="btn btn-ghost btn-sm" onClick={doExcel} disabled={loading || groups.length === 0}>⤓ Excel</button>
+            <button className="btn btn-ghost btn-sm" onClick={doPDF} disabled={loading || groups.length === 0}>⤓ PDF</button>
+          </div>
           <div className="field"><label>Month</label><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></div>
         </div>
       </div>
@@ -181,7 +229,16 @@ function MonthView({ setView }) {
       ) : groups.length === 0 ? (
         <div className="card"><div className="empty">No bills entered for {prettyMonth(month)}.</div></div>
       ) : (
-        <VendorLedger groups={groups} openBill={openBill} setOpenBill={setOpenBill} settle={settle} remove={remove} nav={nav} />
+        <>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <span className="muted" style={{ fontSize: 13 }}>Tick vendors to print only those (individually or together). {sel.size > 0 ? `${sel.size} selected.` : ''}</span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-link" type="button" onClick={selectAll} disabled={allSelected} style={{ fontSize: 13 }}>Select all</button>
+              <button className="btn-link" type="button" onClick={selectNone} disabled={sel.size === 0} style={{ fontSize: 13 }}>Clear</button>
+            </span>
+          </div>
+          <VendorLedger groups={groups} openBill={openBill} setOpenBill={setOpenBill} settle={settle} remove={remove} nav={nav} selectable sel={sel} onToggleSel={toggleSel} />
+        </>
       )}
     </>
   );
@@ -193,7 +250,7 @@ function FragmentRow({ children }) {
 }
 
 // Reusable per-vendor ledger table (used by month & day views).
-function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav }) {
+function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav, selectable, sel, onToggleSel }) {
   return groups.map((g) => {
     const vKey = g.vendorId || g.vendorName;
     const unpaidAmt = g.bills.filter(isUnpaid).reduce((s, b) => s + (Number(b.totalAmount) || 0), 0);
@@ -201,7 +258,12 @@ function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav }) {
     return (
       <div className="ledger-block" key={vKey}>
         <div className="ledger-vhead">
-          <h3>{g.vendorName}</h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {selectable && (
+              <input type="checkbox" checked={sel?.has(g.vendorName) || false} onChange={() => onToggleSel(g.vendorName)} title="Include this vendor when printing selected" style={{ width: 16, height: 16 }} />
+            )}
+            {g.vendorName}
+          </h3>
           <div className="ledger-vmeta">
             {unpaidAmt > 0 && <span className="unpaid-amt">{inr(unpaidAmt)} unpaid</span>}
             <span className="muted">{g.billCount} bill{g.billCount > 1 ? 's' : ''}</span>
@@ -462,6 +524,8 @@ function UnpaidView() {
   const [loading, setLoading] = useState(true);
   const [openVendor, setOpenVendor] = useState({});
   const [busy, setBusy] = useState(false);
+  const [selBills, setSelBills] = useState(() => new Set());
+  const [payDate, setPayDate] = useState(todayISO());
   const [debitAcct, setDebitAcct] = useState(() => { try { return localStorage.getItem('kal_debit_account') || ''; } catch { return ''; } });
   function saveDebit(v) {
     const d = String(v).replace(/[^0-9]/g, '').slice(0, 12);
@@ -483,6 +547,28 @@ function UnpaidView() {
   const grand = useMemo(() => groups.reduce((s, g) => s + g.totalAmount, 0), [groups]);
 
   async function settleBill(id) { setBusy(true); await markBillPaid(id, todayISO()); await load(); setBusy(false); }
+
+  // ---- bulk selection ----
+  const allBillIds = useMemo(() => groups.flatMap((g) => g.bills.map((b) => b.id)), [groups]);
+  function toggleBill(id) { setSelBills((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }
+  function toggleVendor(g, e) {
+    if (e) e.stopPropagation();
+    const ids = g.bills.map((b) => b.id);
+    const allIn = ids.every((id) => selBills.has(id));
+    setSelBills((p) => { const n = new Set(p); ids.forEach((id) => (allIn ? n.delete(id) : n.add(id))); return n; });
+  }
+  function selectAllBills() { setSelBills(new Set(allBillIds)); }
+  function clearSel() { setSelBills(new Set()); }
+  const selTotal = useMemo(() => groups.flatMap((g) => g.bills).filter((b) => selBills.has(b.id)).reduce((s, b) => s + (Number(b.totalAmount) || 0), 0), [groups, selBills]);
+  async function markSelectedPaid() {
+    if (selBills.size === 0) return;
+    if (!confirm(`Mark ${selBills.size} selected bill(s) as paid on ${prettyDate(payDate)} (${inr(selTotal)})?`)) return;
+    setBusy(true);
+    await markBillsPaid([...selBills], payDate);
+    clearSel();
+    await load();
+    setBusy(false);
+  }
   async function settleVendor(g) {
     if (!confirm(`Mark all ${g.billCount} outstanding bill(s) from ${g.vendorName} as paid today (${inr(g.totalAmount)})?`)) return;
     setBusy(true);
@@ -525,6 +611,52 @@ function UnpaidView() {
     return { columns, rows, total };
   }
 
+  // Per-vendor date-wise outstanding bills — printed one vendor per page after the abstract.
+  function unpaidDetail() {
+    const sorted = [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
+    const columns = [
+      { header: 'Date', key: 'date' },
+      { header: 'Bill No', key: 'billNo' },
+      { header: 'Age', key: 'age', align: 'right' },
+      { header: 'Items', key: 'items', align: 'right' },
+      { header: 'Amount (₹)', key: 'amount', align: 'right' },
+    ];
+    const detailGroups = sorted.map((g) => ({
+      vendor: g.vendorName,
+      rows: [...g.bills]
+        .sort((a, b) => (a.billDate < b.billDate ? -1 : 1))
+        .map((b) => ({
+          date: prettyDate(b.billDate),
+          billNo: b.billNo || '—',
+          age: `${ageDays(b.billDate)}d`,
+          items: (b.items || []).length,
+          amount: inr(b.totalAmount),
+        })),
+      total: { date: 'Subtotal', billNo: '', age: '', items: '', amount: inr(g.totalAmount) },
+    }));
+    return { columns, groups: detailGroups };
+  }
+
+  // Per-vendor, per-bill itemised detail (like the Annakshetra statement) — one vendor per page.
+  function billwiseDetail() {
+    const sorted = [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName));
+    return sorted.map((g) => ({
+      vendor: g.vendorName,
+      vendorTotal: inr(g.totalAmount),
+      bills: [...g.bills].sort((a, b) => (a.billDate < b.billDate ? -1 : 1)).map((b) => ({
+        billNo: b.billNo || '—',
+        date: prettyDate(b.billDate),
+        total: inr(b.totalAmount),
+        items: (b.items || []).map((it) => {
+          const q = Number(it.qty) || 0;
+          const gross = Number(it.gross ?? it.amount) || 0;
+          const rate = it.effRate != null ? Number(it.effRate) : (q > 0 ? gross / q : Number(it.rate) || 0);
+          return { name: it.name || it.freeText || '—', qty: q ? qty(q) : '', unit: it.unit || '', rate: inr(rate), amount: inr(gross) };
+        }),
+      })),
+    }));
+  }
+
   // ICICI CIB "PRB" payment-file (matches the bank's upload template). Pays by pre-registered
   // Bene ID. Transaction type auto: ICICI beneficiary (IFSC starts ICIC) → WIB, else → NFT.
   async function downloadBankFile() {
@@ -556,7 +688,7 @@ function UnpaidView() {
     ws['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 26 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    XLSX.writeFile(wb, 'KAL-CIB-payment.xls', { bookType: 'biff8' });
+    XLSX.writeFile(wb, 'Koviloor-CIB-payment.xls', { bookType: 'biff8' });
 
     if (missing.length) alert(`Payment file created for ${ready.length} vendor(s) (${ready.filter((r) => r[0] === 'WIB').length} WIB · ${ready.filter((r) => r[0] === 'NFT').length} NFT).\n\nLeft out — no Bene ID (register in CIB first): ${missing.join(', ')}.`);
   }
@@ -570,7 +702,7 @@ function UnpaidView() {
 
   return (
     <>
-      <PrintSheet id="ps-unpaid" title="Outstanding Bills — Settlement" period={`As on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`} columns={summary.columns} rows={summary.rows} total={summary.total} note="Vendor-wise outstanding across all months." />
+      <PrintSheet id="ps-unpaid" title="Outstanding Bills — Settlement" period={`As on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`} columns={summary.columns} rows={summary.rows} total={summary.total} note="Abstract on the first page; each vendor's itemised bills follow, one vendor per page." billGroups={billwiseDetail()} billwiseLabel="Vendor-wise Bills (itemised)" />
 
       <div className="page-head" style={{ marginBottom: 12 }}>
         <div className="sub">Outstanding across all months</div>
@@ -580,10 +712,10 @@ function UnpaidView() {
             <input value={debitAcct} onChange={(e) => saveDebit(e.target.value)} inputMode="numeric" placeholder="012345678901" style={{ width: 150, fontFamily: 'var(--mono)' }} maxLength={12} />
           </div>
           <button className="btn btn-ghost btn-sm" onClick={downloadBankFile} title="ICICI CIB payment file (.xls) for all outstanding vendors">🏦 Bank file (CIB)</button>
-          <ReportActions filename="KAL-outstanding" printSheetId="ps-unpaid" excelSheets={excelSheets} />
+          <ReportActions filename="koviloor-outstanding" printSheetId="ps-unpaid" excelSheets={excelSheets} />
         </div>
       </div>
-      <div className="stats" style={{ marginBottom: 18 }}>
+      <div className="stats" style={{ marginBottom: 12 }}>
         <div className="stat" style={{ ['--bar']: 'var(--terracotta)' }}>
           <div className="stat-label">Total outstanding</div>
           <div className="stat-value tnum unpaid-amt">{inr(grand)}</div>
@@ -591,12 +723,29 @@ function UnpaidView() {
         </div>
       </div>
 
+      <div className="card card-pad" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5 }}>
+          <input type="checkbox" checked={allBillIds.length > 0 && selBills.size === allBillIds.length} onChange={(e) => (e.target.checked ? selectAllBills() : clearSel())} style={{ width: 16, height: 16 }} />
+          Select all ({allBillIds.length})
+        </label>
+        <span className="muted" style={{ fontSize: 13 }}>{selBills.size > 0 ? `${selBills.size} selected · ${inr(selTotal)}` : 'Tick bills, then mark them paid together after you pay for the month.'}</span>
+        <span style={{ flex: 1 }} />
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          Paid on <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+        </label>
+        <button className="btn btn-primary btn-sm" disabled={busy || selBills.size === 0} onClick={markSelectedPaid}>✓ Mark {selBills.size || ''} paid</button>
+        {selBills.size > 0 && <button className="btn btn-ghost btn-sm" onClick={clearSel}>Clear</button>}
+      </div>
+
       {groups.map((g) => {
         const vKey = g.vendorId || g.vendorName;
         const vOpen = !!openVendor[vKey];
+        const vIds = g.bills.map((b) => b.id);
+        const vAllSel = vIds.length > 0 && vIds.every((id) => selBills.has(id));
         return (
           <div className="vendor-block" key={vKey}>
             <div className={`vendor-bar ${vOpen ? 'open' : ''}`} onClick={() => setOpenVendor((p) => ({ ...p, [vKey]: !p[vKey] }))}>
+              <input type="checkbox" checked={vAllSel} onClick={(e) => e.stopPropagation()} onChange={(e) => toggleVendor(g, e)} title="Select all this vendor's bills" style={{ width: 16, height: 16, marginRight: 4 }} />
               <span className={`chev ${vOpen ? 'open' : ''}`}>▶</span>
               <span className="vendor-name">{g.vendorName}</span>
               <button className="btn btn-danger btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); settleVendor(g); }}>Settle all</button>
@@ -611,7 +760,7 @@ function UnpaidView() {
                 {g.bills.map((b) => (
                   <div className="bill-row" key={b.id}>
                     <div className="bill-head" style={{ cursor: 'default' }}>
-                      <span style={{ width: 13 }} />
+                      <input type="checkbox" checked={selBills.has(b.id)} onChange={() => toggleBill(b.id)} title="Select this bill" style={{ width: 15, height: 15 }} />
                       <span className="bill-no">{b.billNo || '(no bill no.)'}</span>
                       <span className="bill-date">{prettyDate(b.billDate)}</span>
                       <span className="muted" style={{ fontSize: 12.5 }}>{ageDays(b.billDate)}d old</span>

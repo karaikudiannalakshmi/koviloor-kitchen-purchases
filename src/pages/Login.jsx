@@ -21,8 +21,8 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <img src="/logo.jpg" alt="Koviloor Kitchen" className="login-logo" />
-        <p>Koviloor Kitchen · Purchase Ledger</p>
+        <img src="/logo.jpg" alt="Sanatana Dharma Trust Annadhanam" className="login-logo" />
+        <p>Sanatana Dharma Trust · Annadhanam</p>
         <div className="field">
           <label>Access password</label>
           <input

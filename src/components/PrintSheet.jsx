@@ -1,14 +1,14 @@
 // Certified-ledger print layout, modelled on the Kashi/Annakshetra vendor ledger.
 // `detail` (optional) renders a per-vendor date-wise section after the abstract:
 //   detail = { columns:[{header,key,align}], groups:[{ vendor, rows:[...], total:{...} }] }
-export default function PrintSheet({ id, title, period, columns, rows, total, note, sign = true, detail, detailLabel = 'Vendor-wise Bill Detail' }) {
+export default function PrintSheet({ id, title, period, columns, rows, total, note, sign = true, detail, detailLabel = 'Vendor-wise Bill Detail', detailPageBreak = false, billGroups, billwiseLabel = 'Vendor-wise Bill Detail (itemised)' }) {
   const cls = (c) => (c.align === 'right' ? 'r' : '');
   const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   return (
     <div className="print-sheet" id={id}>
       <div className="ps-head">
-        <div className="ps-org">கோவிலூர் மடாலயம் · Koviloor Kitchen</div>
-        <div className="ps-sub">Purchase Ledger</div>
+        <div className="ps-org">Sanatana Dharma Trust · Annadhanam</div>
+        <div className="ps-sub">Annadhanam — Purchase Ledger</div>
       </div>
 
       <div className="ps-title-box">
@@ -38,7 +38,7 @@ export default function PrintSheet({ id, title, period, columns, rows, total, no
         <div className="ps-detail">
           <div className="ps-section-label">{detailLabel}</div>
           {detail.groups.map((g, gi) => (
-            <div className="ps-vendor" key={gi}>
+            <div className={detailPageBreak ? 'ps-vendor ps-vendor-page' : 'ps-vendor'} key={gi}>
               <div className="ps-vendor-name">{g.vendor}</div>
               <table className="ps-table">
                 <thead>
@@ -55,6 +55,32 @@ export default function PrintSheet({ id, title, period, columns, rows, total, no
                   </tfoot>
                 )}
               </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {billGroups && billGroups.length > 0 && (
+        <div className="ps-detail">
+          <div className="ps-section-label">{billwiseLabel}</div>
+          {billGroups.map((g, gi) => (
+            <div className="ps-vendor ps-vendor-page" key={gi}>
+              <div className="ps-vendor-name">{g.vendor}<span className="r" style={{ float: 'right' }}>{g.vendorTotal}</span></div>
+              {g.bills.map((b, bi) => (
+                <div className="ps-bill" key={bi}>
+                  <div className="ps-bill-head">Bill {b.billNo} · {b.date}<span style={{ float: 'right' }}>{b.total}</span></div>
+                  <table className="ps-table">
+                    <thead>
+                      <tr><th>Item</th><th className="r">Qty</th><th>Unit</th><th className="r">Rate</th><th className="r">Amount</th></tr>
+                    </thead>
+                    <tbody>
+                      {b.items.map((it, ii) => (
+                        <tr key={ii}><td>{it.name}</td><td className="r">{it.qty}</td><td>{it.unit}</td><td className="r">{it.rate}</td><td className="r">{it.amount}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             </div>
           ))}
         </div>

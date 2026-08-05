@@ -19,7 +19,7 @@ export default function Layout({ children }) {
     <div className="app">
       <aside className="sidebar">
         <NavLink to="/" className="brand-logo-link">
-          <img src="/logo.jpg" alt="Koviloor Kitchen" className="brand-logo" />
+          <img src="/logo.jpg" alt="Sanatana Dharma Trust Annadhanam" className="brand-logo" />
         </NavLink>
 
         <nav className="nav">

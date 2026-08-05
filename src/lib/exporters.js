@@ -50,9 +50,9 @@ export async function exportElementPDF(node, filename) {
 
 /* ------------------------------ Print ----------------------------------
    Prints only the certified print-sheet (interactive UI hidden via a body class). */
-export function printCertified() {
-  document.body.classList.add('printing-certified');
-  const cleanup = () => { document.body.classList.remove('printing-certified'); window.removeEventListener('afterprint', cleanup); };
+export function printCertified(cls = 'printing-certified') {
+  document.body.classList.add(cls);
+  const cleanup = () => { document.body.classList.remove(cls); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
   window.print();
 }

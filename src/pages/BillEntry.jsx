@@ -687,7 +687,7 @@ export default function BillEntry() {
     try {
       if (editing) await updateBill(id, payload);
       else await addBill(payload);
-      nav(status === 'draft' ? '/bills?view=drafts' : '/bills');
+      nav(status === 'draft' ? '/bills?view=drafts' : `/bills?month=${billDate.slice(0, 7)}`);
     } catch (e) {
       alert('Save failed: ' + e.message);
       setBusy(false);
