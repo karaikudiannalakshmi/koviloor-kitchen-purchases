@@ -330,7 +330,9 @@ input.num-input { text-align: right; font-family: var(--mono); }
 .ps-detail { margin-top: 24px; }
 .ps-vendor { margin-bottom: 16px; }
 .ps-vendor-name { font-family: var(--serif); font-size: 14px; font-weight: 700; padding: 4px 2px; border-bottom: 2px solid #000; margin-bottom: 4px; }
-@media print { .ps-vendor { break-inside: avoid; page-break-inside: avoid; } }
+@media print { .ps-vendor { break-inside: avoid; page-break-inside: avoid; } .ps-vendor-page { page-break-before: always; } .ps-bill { break-inside: avoid; page-break-inside: avoid; } }
+.ps-bill { margin: 10px 0 14px; }
+.ps-bill-head { font-size: 12px; font-weight: 600; padding: 4px 6px; background: #f3ece0; border: 1px solid #d8c9ad; overflow: hidden; }
 .ps-sign { margin-top: 64px; width: 220px; margin-left: auto; text-align: center; }
 .ps-line { border-top: 1px solid #000; margin-bottom: 5px; }
 .ps-sign-name { font-weight: 700; font-size: 12px; }
@@ -342,7 +344,13 @@ input.num-input { text-align: right; font-family: var(--mono); }
   @page { margin: 14mm; }
   body.printing-certified .main > * { display: none !important; }
   body.printing-certified .main > .print-sheet { display: block !important; position: static !important; left: auto !important; width: auto !important; padding: 0 !important; }
+  /* Each ticked vendor on its own sheet */
+  body.printing-individual .main > * { display: none !important; }
+  body.printing-individual .main > .print-individual-wrap { display: block !important; position: static !important; left: auto !important; }
+  body.printing-individual .print-individual-wrap > .print-sheet { display: block !important; position: static !important; left: auto !important; width: auto !important; padding: 0 !important; page-break-after: always; }
+  body.printing-individual .print-individual-wrap > .print-sheet:last-child { page-break-after: auto; }
 }
+.print-individual-wrap { position: absolute; left: -10000px; top: 0; }
 
 @media print {
   .sidebar, .report-actions, .toolbar, .pay-toggle, .add-line,
