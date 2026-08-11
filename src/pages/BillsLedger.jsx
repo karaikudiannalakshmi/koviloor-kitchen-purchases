@@ -86,17 +86,17 @@ function MonthView({ setView }) {
     }));
     return {
       sheets: [
-        { name: 'Bills', columns: [
+        { name: 'Line items (detailed)', columns: [
+          { header: 'Date', key: 'date' }, { header: 'Vendor', key: 'vendor' }, { header: 'Bill No', key: 'billNo' },
+          { header: 'Item', key: 'item' }, { header: 'Category', key: 'category' }, { header: 'Qty', key: 'qty' },
+          { header: 'Unit', key: 'unit' }, { header: 'Rate', key: 'rate' }, { header: 'GST %', key: 'gstPct' },
+          { header: 'Taxable', key: 'amount' }, { header: 'Amount', key: 'gross' },
+        ], rows: itemRows },
+        { name: 'Bill summary', columns: [
           { header: 'Vendor', key: 'vendor' }, { header: 'Bill No', key: 'billNo' }, { header: 'Date', key: 'date' },
           { header: 'Items', key: 'items' }, { header: 'Subtotal', key: 'subtotal' }, { header: 'GST', key: 'gst' },
           { header: 'Total', key: 'total' }, { header: 'Status', key: 'status' }, { header: 'Paid On', key: 'paidOn' },
         ], rows: billRows },
-        { name: 'Item detail', columns: [
-          { header: 'Date', key: 'date' }, { header: 'Vendor', key: 'vendor' }, { header: 'Bill No', key: 'billNo' },
-          { header: 'Item', key: 'item' }, { header: 'Category', key: 'category' }, { header: 'Qty', key: 'qty' },
-          { header: 'Unit', key: 'unit' }, { header: 'Rate', key: 'rate' }, { header: 'GST %', key: 'gstPct' },
-          { header: 'Taxable', key: 'amount' }, { header: 'Gross', key: 'gross' },
-        ], rows: itemRows },
       ],
     };
   }
@@ -195,12 +195,12 @@ function MonthView({ setView }) {
 
   return (
     <>
-      <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} detail={vendorDetail(combinedGroups)} />
+      <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} note="Abstract on the first page; each vendor's itemised bills follow, one vendor per page." billGroups={buildBillwise(combinedGroups)} billwiseLabel="Vendor-wise Bills (itemised)" />
 
       <div className="print-individual-wrap">
         {individualGroups.map((g, i) => {
-          const sv = vendorSummary([g]); const dv = vendorDetail([g]);
-          return <PrintSheet key={g.vendorName} id={`ps-vendor-${i}`} title="Vendor Payment Statement" period={`${prettyMonth(month)} · ${g.vendorName}`} columns={sv.columns} rows={sv.rows} total={sv.total} detail={dv} />;
+          const sv = vendorSummary([g]);
+          return <PrintSheet key={g.vendorName} id={`ps-vendor-${i}`} title="Vendor Bill Statement" period={`${prettyMonth(month)} · ${g.vendorName}`} columns={sv.columns} rows={sv.rows} total={sv.total} billGroups={buildBillwise([g])} billwiseLabel="Bills (itemised)" />;
         })}
       </div>
 
@@ -250,6 +250,25 @@ function FragmentRow({ children }) {
 }
 
 // Reusable per-vendor ledger table (used by month & day views).
+// ---- shared: per-vendor, per-bill itemised detail for printing ----
+function buildBillwise(gs) {
+  return [...gs].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).map((g) => ({
+    vendor: g.vendorName,
+    vendorTotal: inr(g.totalAmount),
+    bills: [...g.bills].sort((a, b) => (a.billDate < b.billDate ? -1 : 1)).map((b) => ({
+      billNo: b.billNo || '—',
+      date: prettyDate(b.billDate),
+      total: inr(b.totalAmount),
+      items: (b.items || []).map((it) => {
+        const q = Number(it.qty) || 0;
+        const gross = Number(it.gross ?? it.amount) || 0;
+        const rate = it.effRate != null ? Number(it.effRate) : (q > 0 ? gross / q : Number(it.rate) || 0);
+        return { name: it.name || it.freeText || '—', qty: q ? qty(q) : '', unit: it.unit || '', rate: inr(rate), amount: inr(gross) };
+      }),
+    })),
+  }));
+}
+
 function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav, selectable, sel, onToggleSel }) {
   return groups.map((g) => {
     const vKey = g.vendorId || g.vendorName;
