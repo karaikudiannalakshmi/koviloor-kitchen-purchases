@@ -349,8 +349,12 @@ input.num-input { text-align: right; font-family: var(--mono); }
   body.printing-individual .main > .print-individual-wrap { display: block !important; position: static !important; left: auto !important; }
   body.printing-individual .print-individual-wrap > .print-sheet { display: block !important; position: static !important; left: auto !important; width: auto !important; padding: 0 !important; page-break-after: always; }
   body.printing-individual .print-individual-wrap > .print-sheet:last-child { page-break-after: auto; }
+  /* Print a single bill */
+  body.printing-onebill .main > * { display: none !important; }
+  body.printing-onebill .main > .print-onebill-wrap { display: block !important; position: static !important; left: auto !important; }
+  body.printing-onebill .print-onebill-wrap > .print-sheet { display: block !important; position: static !important; left: auto !important; width: auto !important; padding: 0 !important; }
 }
-.print-individual-wrap { position: absolute; left: -10000px; top: 0; }
+.print-onebill-wrap { position: absolute; left: -10000px; top: 0; }
 
 @media print {
   .sidebar, .report-actions, .toolbar, .pay-toggle, .add-line,

@@ -193,6 +193,36 @@ function MonthView({ setView }) {
     await exportElementPDF(document.getElementById('ps-bills'), `koviloor-bills-${month}`);
   }
 
+  // ---- single bill: print one bill as an itemised voucher, or export just its items ----
+  const [oneBill, setOneBill] = useState(null); // { bill, vendorName }
+  useEffect(() => {
+    if (!oneBill) return undefined;
+    const t = setTimeout(async () => {
+      const { printCertified } = await import('../lib/exporters');
+      printCertified('printing-onebill');
+      setOneBill(null);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [oneBill]);
+  function printBill(bill, vendorName) { setOneBill({ bill, vendorName }); }
+  async function exportBill(bill, vendorName) {
+    const { exportExcel } = await import('../lib/exporters');
+    const rows = (bill.items || []).map((it) => {
+      const q = Number(it.qty) || 0; const gross = Number(it.gross ?? it.amount) || 0;
+      const rate = it.effRate != null ? Number(it.effRate) : (q > 0 ? gross / q : Number(it.rate) || 0);
+      return { item: it.name || it.freeText || '', category: cats.name(it.category), qty: q, unit: it.unit || '', rate: Math.round(rate * 100) / 100, gstPct: it.gstPct || 0, amount: Math.round(gross * 100) / 100 };
+    });
+    exportExcel(`bill-${(bill.billNo || 'nobillno')}-${vendorName}`.replace(/[^\w-]/g, '_'), [{
+      name: 'Bill items',
+      columns: [
+        { header: 'Item', key: 'item' }, { header: 'Category', key: 'category' }, { header: 'Qty', key: 'qty' },
+        { header: 'Unit', key: 'unit' }, { header: 'Rate', key: 'rate' }, { header: 'GST %', key: 'gstPct' }, { header: 'Amount', key: 'amount' },
+      ],
+      rows,
+    }]);
+  }
+  const oneBillGroups = oneBill ? buildBillwise([{ vendorName: oneBill.vendorName, totalAmount: oneBill.bill.totalAmount, bills: [oneBill.bill] }]) : [];
+
   return (
     <>
       <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} note="Abstract on the first page; each vendor's itemised bills follow, one vendor per page." billGroups={buildBillwise(combinedGroups)} billwiseLabel="Vendor-wise Bills (itemised)" />
@@ -237,7 +267,13 @@ function MonthView({ setView }) {
               <button className="btn-link" type="button" onClick={selectNone} disabled={sel.size === 0} style={{ fontSize: 13 }}>Clear</button>
             </span>
           </div>
-          <VendorLedger groups={groups} openBill={openBill} setOpenBill={setOpenBill} settle={settle} remove={remove} nav={nav} selectable sel={sel} onToggleSel={toggleSel} />
+      <div className="print-onebill-wrap">
+        {oneBill && (
+          <PrintSheet id="ps-onebill" title={`Bill ${oneBill.bill.billNo || ''}`} period={`${oneBill.vendorName} · ${prettyDate(oneBill.bill.billDate)}`} rows={[]} billGroups={oneBillGroups} billwiseLabel="" />
+        )}
+      </div>
+
+          <VendorLedger groups={groups} openBill={openBill} setOpenBill={setOpenBill} settle={settle} remove={remove} nav={nav} selectable sel={sel} onToggleSel={toggleSel} onPrintBill={printBill} onExportBill={exportBill} />
         </>
       )}
     </>
@@ -269,7 +305,7 @@ function buildBillwise(gs) {
   }));
 }
 
-function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav, selectable, sel, onToggleSel }) {
+function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav, selectable, sel, onToggleSel, onPrintBill, onExportBill }) {
   return groups.map((g) => {
     const vKey = g.vendorId || g.vendorName;
     const unpaidAmt = g.bills.filter(isUnpaid).reduce((s, b) => s + (Number(b.totalAmount) || 0), 0);
@@ -340,6 +376,8 @@ function VendorLedger({ groups, openBill, setOpenBill, settle, remove, nav, sele
                             <span>{up ? 'Outstanding' : `Paid on ${prettyDate(b.paidDate) || '—'}`}</span>
                             {b.notes && <span>📝 {b.notes}</span>}
                             <span className="bill-spacer" />
+                            {onPrintBill && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); onPrintBill(b, g.vendorName); }}>🖨 Print bill</button>}
+                            {onExportBill && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); onExportBill(b, g.vendorName); }}>⤓ Excel</button>}
                             <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); nav(`/bills/${b.id}/edit`); }}>Edit</button>
                             <button className="btn btn-danger btn-sm" onClick={(e) => remove(b, e)}>Delete</button>
                           </div>

@@ -17,22 +17,26 @@ export default function PrintSheet({ id, title, period, columns, rows, total, no
       </div>
       <div className="ps-ref">Generated: {today}</div>
 
-      <div className="ps-section-label">Vendor Abstract</div>
-      <table className="ps-table">
-        <thead>
-          <tr>{columns.map((c) => <th key={c.key} className={cls(c)}>{c.header}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>{columns.map((c) => <td key={c.key} className={cls(c)}>{r[c.key]}</td>)}</tr>
-          ))}
-        </tbody>
-        {total && (
-          <tfoot>
-            <tr>{columns.map((c) => <td key={c.key} className={cls(c)}>{total[c.key] ?? ''}</td>)}</tr>
-          </tfoot>
-        )}
-      </table>
+      {rows && rows.length > 0 && (
+        <>
+          <div className="ps-section-label">Vendor Abstract</div>
+          <table className="ps-table">
+            <thead>
+              <tr>{columns.map((c) => <th key={c.key} className={cls(c)}>{c.header}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>{columns.map((c) => <td key={c.key} className={cls(c)}>{r[c.key]}</td>)}</tr>
+              ))}
+            </tbody>
+            {total && (
+              <tfoot>
+                <tr>{columns.map((c) => <td key={c.key} className={cls(c)}>{total[c.key] ?? ''}</td>)}</tr>
+              </tfoot>
+            )}
+          </table>
+        </>
+      )}
 
       {detail && detail.groups.length > 0 && (
         <div className="ps-detail">
@@ -62,7 +66,7 @@ export default function PrintSheet({ id, title, period, columns, rows, total, no
 
       {billGroups && billGroups.length > 0 && (
         <div className="ps-detail">
-          <div className="ps-section-label">{billwiseLabel}</div>
+          {billwiseLabel && <div className="ps-section-label">{billwiseLabel}</div>}
           {billGroups.map((g, gi) => (
             <div className="ps-vendor ps-vendor-page" key={gi}>
               <div className="ps-vendor-name">{g.vendor}<span className="r" style={{ float: 'right' }}>{g.vendorTotal}</span></div>
