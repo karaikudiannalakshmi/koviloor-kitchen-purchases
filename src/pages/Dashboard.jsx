@@ -7,6 +7,7 @@ import ReportActions from '../components/ReportActions';
 import PrintSheet from '../components/PrintSheet';
 import { Cat } from '../components/Cat';
 import { inr, qty, prettyMonth, shortMonth, currentMonthKey, todayISO } from '../lib/format';
+import { resolveCommodity } from '../lib/marketRateMap';
 
 // Only these categories appear on the dashboard.
 
@@ -76,6 +77,68 @@ export default function Dashboard() {
 
   const allowedRows = useMemo(() => rows.filter((r) => isAllowed(r.category)), [rows, isAllowed]);
   const total = useMemo(() => allowedRows.reduce((s, r) => s + r.totalAmount, 0), [allowedRows]);
+  // ---- Near-Koviloor market-rate comparison (Sivaganga / Madurai / Trichy region) ----
+  // Match purchased items to a known Agmarknet commodity, using each item's MOST RECENT
+  // purchase rate (not a monthly average) so it's a fair like-for-like against today's mandi price.
+  const marketMatches = useMemo(() => {
+    const latestByKey = new Map(); // key -> { date, rate, name, category, unit }
+    allBills.forEach((b) => (b.items || []).forEach((it) => {
+      if (!isAllowed(it.category)) return;
+      const key = it.ingredientId || it.name;
+      const q = Number(it.qty) || 0;
+      const gross = Number(it.gross ?? it.amount) || 0;
+      const rate = it.effRate != null ? Number(it.effRate) : (q > 0 ? gross / q : Number(it.rate) || 0);
+      if (!(rate > 0) || !b.billDate) return;
+      const prev = latestByKey.get(key);
+      if (!prev || b.billDate > prev.date) {
+        latestByKey.set(key, { date: b.billDate, rate, name: it.name, category: it.category, unit: it.unit });
+      }
+    }));
+    const seen = new Map();
+    latestByKey.forEach((v) => {
+      const commodity = resolveCommodity(v.name);
+      if (!commodity || seen.has(commodity)) return;
+      seen.set(commodity, { commodity, itemName: v.name, avgRate: v.rate, unit: v.unit, lastPurchaseDate: v.date });
+    });
+    return [...seen.values()].sort((a, b) => (b.lastPurchaseDate || '').localeCompare(a.lastPurchaseDate || ''));
+  }, [allBills, isAllowed]);
+
+  const [marketRates, setMarketRates] = useState({}); // commodity -> {ok, modalPerKg, date, ...}
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketError, setMarketError] = useState('');
+  const [marketApiNote, setMarketApiNote] = useState('');
+  const [marketDebug, setMarketDebug] = useState(null);
+  const marketKey = marketMatches.map((m) => m.commodity).sort().join(',');
+  useEffect(() => {
+    if (!marketKey) { setMarketRates({}); return; }
+    setMarketLoading(true); setMarketError(''); setMarketApiNote('');
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 25000);
+    fetch(`/api/market-rate?commodities=${encodeURIComponent(marketKey)}`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) { setMarketRates(data.results || {}); if (data.note) setMarketApiNote(data.note); setMarketDebug(data.debug || null); }
+        else setMarketError(data.error || 'Could not load market rates.');
+      })
+      .catch((e) => setMarketError(e.name === 'AbortError' ? 'Timed out — try reloading.' : 'Could not reach the market-rate service.'))
+      .finally(() => { clearTimeout(timeout); setMarketLoading(false); });
+    return () => { clearTimeout(timeout); ctrl.abort(); };
+  }, [marketKey]);
+
+  const marketRows = useMemo(() => marketMatches.map((m) => {
+    const mr = marketRates[m.commodity];
+    if (!mr || !mr.ok) {
+      const reasonLabel = mr?.reason === 'rate_limited' ? 'rate-limited, retry later'
+        : mr?.reason === 'no_data' ? 'no recent mandi record'
+        : mr?.reason === 'fetch_failed' ? 'unavailable'
+        : 'loading…';
+      return { ...m, market: null, reasonLabel };
+    }
+    const gapPct = mr.modalPerKg > 0 ? ((m.avgRate - mr.modalPerKg) / mr.modalPerKg) * 100 : null;
+    return { ...m, market: mr, gapPct };
+  }), [marketMatches, marketRates]);
+  const marketNote = marketApiNote;
+
   const perCat = useMemo(() => cats.categories
     .filter((c) => isAllowed(c.key))
     .map((c) => ({ ...c, amount: allowedRows.filter((r) => r.category === c.key).reduce((s, r) => s + r.totalAmount, 0) }))
@@ -256,6 +319,52 @@ export default function Dashboard() {
               </div>
             </>
           )}
+
+          <div className="section-title">Market rate check — your last purchase vs nearby mandi</div>
+          <div className="card card-pad" style={{ marginBottom: 22 }}>
+            {marketMatches.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13 }}>None of your purchased items are matched to a mandi commodity yet.</div>
+            ) : marketLoading ? (
+              <div className="muted" style={{ fontSize: 13 }}>Checking nearby mandi rates…</div>
+            ) : marketError ? (
+              <div className="muted" style={{ fontSize: 13 }}>Couldn't load market rates right now ({marketError}). Try again shortly.</div>
+            ) : (
+              <>
+                {marketNote && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#a5471f' }}>⚠️ {marketNote}</div>}
+                <div className="table-wrap">
+                  <table className="ledger-table">
+                    <thead><tr><th>Item</th><th className="num">Your last rate (₹/kg)</th><th className="num">Mandi modal (₹/kg)</th><th>Market · as on</th><th className="num">Gap</th></tr></thead>
+                    <tbody>
+                      {marketRows.map((m) => (
+                        <tr key={m.commodity}>
+                          <td style={{ fontWeight: 600 }}>{m.itemName}</td>
+                          <td className="num">{inr(m.avgRate)} <span className="muted" style={{ fontSize: 11 }}>({m.lastPurchaseDate})</span></td>
+                          <td className="num">{m.market ? inr(m.market.modalPerKg) : <span className="muted" style={{ fontSize: 12 }}>{m.reasonLabel}</span>}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>
+                            {m.market ? (
+                              <>{m.market.market}{m.market.tier === 'tamil_nadu' && <span style={{ color: '#a5471f' }}> (other TN market)</span>} · {m.market.date}</>
+                            ) : '—'}
+                          </td>
+                          <td className="num" style={{ fontWeight: 700, color: m.gapPct == null ? undefined : (m.gapPct >= 0 ? '#c0392b' : '#3f7a34') }}>
+                            {m.gapPct == null ? '—' : `${m.gapPct >= 0 ? '+' : ''}${m.gapPct.toFixed(0)}%`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+                  "Your last rate" is the price from your most recent purchase of that item, whatever month it was in — compared against the mandi's most recently reported price. Prefers markets near Koviloor (Sivaganga, Madurai, Tiruchirappalli, Pudukkottai, Ramanathapuram), and only falls to other Tamil Nadu markets as a last resort — labelled "(other TN market)". This is a wholesale mandi price — your vendor rate naturally runs higher (retail delivery, handling, margin). Treat a large or sudden gap as worth a look, not proof of overcharging. Source: Agmarknet / data.gov.in.
+                </div>
+                {marketDebug && (
+                  <details style={{ marginTop: 8, fontSize: 11 }}>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Diagnostic info (for troubleshooting)</summary>
+                    <pre style={{ whiteSpace: 'pre-wrap', fontSize: 10.5, background: '#f7f1e3', padding: 8, borderRadius: 6, maxHeight: 220, overflow: 'auto' }}>{JSON.stringify(marketDebug, null, 2)}</pre>
+                  </details>
+                )}
+              </>
+            )}
+          </div>
 
           <div className="section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Price movers{baselineMonth ? ` — since ${prettyMonth(baselineMonth)}` : ''}</span>
