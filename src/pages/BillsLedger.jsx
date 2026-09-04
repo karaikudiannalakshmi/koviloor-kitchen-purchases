@@ -582,6 +582,7 @@ function UnpaidView() {
   const [openVendor, setOpenVendor] = useState({});
   const [busy, setBusy] = useState(false);
   const [selBills, setSelBills] = useState(() => new Set());
+  const [monthFilter, setMonthFilter] = useState('all');
   const [payDate, setPayDate] = useState(todayISO());
   const [debitAcct, setDebitAcct] = useState(() => { try { return localStorage.getItem('kal_debit_account') || ''; } catch { return ''; } });
   const [neftDebitAcct, setNeftDebitAcct] = useState(() => { try { return localStorage.getItem('kal_neft_debit_account') || ''; } catch { return ''; } });
@@ -605,10 +606,30 @@ function UnpaidView() {
 
   const grand = useMemo(() => groups.reduce((s, g) => s + g.totalAmount, 0), [groups]);
 
+  // Months present among the unpaid bills, for the filter dropdown.
+  const availableMonths = useMemo(() => {
+    const set = new Set();
+    groups.forEach((g) => g.bills.forEach((b) => { if (b.billDate) set.add(b.billDate.slice(0, 7)); }));
+    return [...set].sort().reverse();
+  }, [groups]);
+
+  // Groups narrowed to the selected month (bills only; vendors with none left are dropped).
+  const fGroups = useMemo(() => {
+    if (monthFilter === 'all') return groups;
+    return groups
+      .map((g) => {
+        const bills = g.bills.filter((b) => b.billDate && b.billDate.slice(0, 7) === monthFilter);
+        if (bills.length === 0) return null;
+        return { ...g, bills, billCount: bills.length, totalAmount: bills.reduce((s, b) => s + (Number(b.totalAmount) || 0), 0) };
+      })
+      .filter(Boolean);
+  }, [groups, monthFilter]);
+  const fGrand = useMemo(() => fGroups.reduce((s, g) => s + g.totalAmount, 0), [fGroups]);
+
   async function settleBill(id) { setBusy(true); await markBillPaid(id, todayISO()); await load(); setBusy(false); }
 
   // ---- bulk selection ----
-  const allBillIds = useMemo(() => groups.flatMap((g) => g.bills.map((b) => b.id)), [groups]);
+  const allBillIds = useMemo(() => fGroups.flatMap((g) => g.bills.map((b) => b.id)), [fGroups]);
   function toggleBill(id) { setSelBills((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }
   function toggleVendor(g, e) {
     if (e) e.stopPropagation();
@@ -618,7 +639,7 @@ function UnpaidView() {
   }
   function selectAllBills() { setSelBills(new Set(allBillIds)); }
   function clearSel() { setSelBills(new Set()); }
-  const selTotal = useMemo(() => groups.flatMap((g) => g.bills).filter((b) => selBills.has(b.id)).reduce((s, b) => s + (Number(b.totalAmount) || 0), 0), [groups, selBills]);
+  const selTotal = useMemo(() => fGroups.flatMap((g) => g.bills).filter((b) => selBills.has(b.id)).reduce((s, b) => s + (Number(b.totalAmount) || 0), 0), [fGroups, selBills]);
   async function markSelectedPaid() {
     if (selBills.size === 0) return;
     if (!confirm(`Mark ${selBills.size} selected bill(s) as paid on ${prettyDate(payDate)} (${inr(selTotal)})?`)) return;
@@ -718,12 +739,24 @@ function UnpaidView() {
 
   // ICICI CIB "PRB" payment-file (matches the bank's upload template). Pays by pre-registered
   // Bene ID. Transaction type auto: ICICI beneficiary (IFSC starts ICIC) → WIB, else → NFT.
+  // Vendor totals to actually pay: from the ticked bills if any are selected,
+  // otherwise every bill currently shown (respecting the month filter above).
+  const payGroups = useMemo(() => {
+    const source = selBills.size > 0
+      ? fGroups.map((g) => ({ ...g, bills: g.bills.filter((b) => selBills.has(b.id)) })).filter((g) => g.bills.length > 0)
+      : fGroups;
+    return source.map((g) => ({ ...g, totalAmount: g.bills.reduce((s, b) => s + (Number(b.totalAmount) || 0), 0), billCount: g.bills.length }));
+  }, [fGroups, selBills]);
+  const payScopeLabel = selBills.size > 0
+    ? `${selBills.size} selected bill${selBills.size === 1 ? '' : 's'}`
+    : (monthFilter === 'all' ? 'all outstanding bills' : `${prettyMonth(monthFilter)} bills`);
+
   async function downloadBankFile() {
     const acct = String(debitAcct || '').replace(/[^0-9]/g, '');
     if (acct.length !== 12) { alert('Enter the 12-digit ICICI debit account (top of the Bank file section) before exporting.'); return; }
 
     const ready = []; const missing = [];
-    [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).forEach((g) => {
+    [...payGroups].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).forEach((g) => {
       const v = vendorsById[g.vendorId] || {};
       const bene = String(v.bankBeneId || '').trim();
       if (!bene) { missing.push(g.vendorName); return; }
@@ -733,7 +766,8 @@ function UnpaidView() {
       ready.push([txn, acct, Math.round((Number(g.totalAmount) || 0) * 100) / 100, bene, remarks]);
     });
 
-    if (ready.length === 0) { alert('No vendors have a Bene ID yet. Add the bank-registered Beneficiary ID on the Vendors page first.'); return; }
+    if (ready.length === 0) { alert('No vendors in this selection have a Bene ID yet. Add the bank-registered Beneficiary ID on the Vendors page first.'); return; }
+    if (!confirm(`Create the CIB payment file for ${payScopeLabel} (${ready.length} vendor line${ready.length === 1 ? '' : 's'})?`)) return;
 
     const XLSX = await import('xlsx');
     const header = [
@@ -766,7 +800,7 @@ function UnpaidView() {
     const ready = []; const missing = [];
     const paymentDate = excelDateSerial(new Date());
     const narr = `Purchases ${new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`;
-    [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).forEach((g) => {
+    [...payGroups].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).forEach((g) => {
       const v = vendorsById[g.vendorId] || {};
       const beneAcct = String(v.bankAccount || '').trim();
       const ifsc = String(v.bankIfsc || '').toUpperCase().trim();
@@ -778,7 +812,8 @@ function UnpaidView() {
       ]);
     });
 
-    if (ready.length === 0) { alert('No vendors have both a bank account number and IFSC yet. Add these on the Vendors page first.'); return; }
+    if (ready.length === 0) { alert('No vendors in this selection have both a bank account number and IFSC yet. Add these on the Vendors page first.'); return; }
+    if (!confirm(`Create the NEFT payment file for ${payScopeLabel} (${ready.length} vendor line${ready.length === 1 ? '' : 's'})?`)) return;
 
     const XLSX = await import('xlsx');
     const header = [
@@ -813,22 +848,30 @@ function UnpaidView() {
             <label>ICICI debit a/c (12 digit)</label>
             <input value={debitAcct} onChange={(e) => saveDebit(e.target.value)} inputMode="numeric" placeholder="012345678901" style={{ width: 150, fontFamily: 'var(--mono)' }} maxLength={12} />
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={downloadBankFile} title="ICICI CIB payment file (.xls) for all outstanding vendors">🏦 Bank file (CIB)</button>
+          <button className="btn btn-ghost btn-sm" onClick={downloadBankFile} title="ICICI CIB payment file (.xls) — uses ticked bills, or the month filter if none are ticked">🏦 Bank file (CIB)</button>
           <div className="field" style={{ flex: 'none' }}>
             <label>NEFT debit a/c</label>
             <input value={neftDebitAcct} onChange={(e) => saveNeftDebit(e.target.value)} inputMode="numeric" placeholder="051905001687" style={{ width: 150, fontFamily: 'var(--mono)' }} maxLength={20} />
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={downloadNeftBankFile} title="NEFT vendor-payment upload file (.xls) for all outstanding vendors">🏦 Bank file (NEFT)</button>
+          <button className="btn btn-ghost btn-sm" onClick={downloadNeftBankFile} title="NEFT vendor-payment file (.xls) — uses ticked bills, or the month filter if none are ticked">🏦 Bank file (NEFT)</button>
           <ReportActions filename="koviloor-outstanding" printSheetId="ps-unpaid" excelSheets={excelSheets} />
         </div>
       </div>
       <div className="stats" style={{ marginBottom: 12 }}>
         <div className="stat" style={{ ['--bar']: 'var(--terracotta)' }}>
-          <div className="stat-label">Total outstanding</div>
-          <div className="stat-value tnum unpaid-amt">{inr(grand)}</div>
-          <div className="stat-meta">{groups.length} vendor{groups.length > 1 ? 's' : ''} · {groups.reduce((s, g) => s + g.billCount, 0)} bills</div>
+          <div className="stat-label">{monthFilter === 'all' ? 'Total outstanding' : `Outstanding — ${prettyMonth(monthFilter)}`}</div>
+          <div className="stat-value tnum unpaid-amt">{inr(fGrand)}</div>
+          <div className="stat-meta">{fGroups.length} vendor{fGroups.length !== 1 ? 's' : ''} · {fGroups.reduce((s, g) => s + g.billCount, 0)} bills{monthFilter !== 'all' ? ` (of ${inr(grand)} total outstanding)` : ''}</div>
+        </div>
+        <div className="field" style={{ flex: 'none', alignSelf: 'center' }}>
+          <label>Bill month</label>
+          <select value={monthFilter} onChange={(e) => { setMonthFilter(e.target.value); clearSel(); }} style={{ width: 170 }}>
+            <option value="all">All months</option>
+            {availableMonths.map((m) => <option key={m} value={m}>{prettyMonth(m)}</option>)}
+          </select>
         </div>
       </div>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>The bank files and bulk "Mark paid" use only your ticked bills below (or, if none are ticked, everything currently shown — narrow with the month filter first if you want a specific batch).</div>
 
       <div className="card card-pad" style={{ marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5 }}>
@@ -844,7 +887,7 @@ function UnpaidView() {
         {selBills.size > 0 && <button className="btn btn-ghost btn-sm" onClick={clearSel}>Clear</button>}
       </div>
 
-      {groups.map((g) => {
+      {fGroups.map((g) => {
         const vKey = g.vendorId || g.vendorName;
         const vOpen = !!openVendor[vKey];
         const vIds = g.bills.map((b) => b.id);

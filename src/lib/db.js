@@ -128,6 +128,29 @@ export async function seedIngredients(seed) {
   return { added, skipped: seed.length - toAdd.length };
 }
 
+/* --------------------------- Daily delivery log --------------------------
+   For items delivered every day but billed once a month (e.g. milk).
+   One doc per vendor+ingredient+month: { vendorId, vendorName, ingredientId,
+   ingredientName, unit, monthKey, entries: { '01': {qty, rate}, ... },
+   billed: false, billId: null }. Doc id = `${vendorId}_${ingredientId}_${monthKey}`. */
+const DAILY_LOGS = 'dailyLogs';
+
+export function dailyLogId(vendorId, ingredientId, monthKey) {
+  return `${vendorId}_${ingredientId}_${monthKey}`;
+}
+export async function getDailyLog(vendorId, ingredientId, monthKey) {
+  const snap = await getDoc(doc(db, DAILY_LOGS, dailyLogId(vendorId, ingredientId, monthKey)));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+export async function saveDailyLog(vendorId, ingredientId, monthKey, data) {
+  const id = dailyLogId(vendorId, ingredientId, monthKey);
+  await setDoc(doc(db, DAILY_LOGS, id), { ...data, vendorId, ingredientId, monthKey, updatedAt: serverTimestamp() }, { merge: true });
+  return id;
+}
+export async function markDailyLogBilled(vendorId, ingredientId, monthKey, billId) {
+  await setDoc(doc(db, DAILY_LOGS, dailyLogId(vendorId, ingredientId, monthKey)), { billed: true, billId, updatedAt: serverTimestamp() }, { merge: true });
+}
+
 /* ------------------------------- Bills ---------------------------------- */
 export function addBill(b) {
   return addDoc(collection(db, BILLS), { ...b, createdAt: serverTimestamp() });

@@ -6,6 +6,7 @@ const nav = [
   { to: '/bills/new', label: 'New Bill', ico: '＋' },
   { to: '/bills', label: 'Bills Ledger', ico: '▤' },
   { to: '/ledger', label: 'Ingredient Ledger', ico: '⤢' },
+  { to: '/daily-log', label: 'Daily Log', ico: '🥛' },
 ];
 const masters = [
   { to: '/vendors', label: 'Vendors', ico: '☖' },
