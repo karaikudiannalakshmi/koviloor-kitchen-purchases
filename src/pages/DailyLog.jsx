@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listVendors, listIngredients, getDailyLog, saveDailyLog, markDailyLogBilled, addBill } from '../lib/db';
 import { inr, currentMonthKey, prettyMonth } from '../lib/format';
+import IngredientSelect from '../components/IngredientSelect';
 
 // Days in a given 'YYYY-MM' month key.
 function daysInMonth(monthKey) {
@@ -164,12 +165,14 @@ export default function DailyLog() {
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
-          <div className="field">
+          <div className="field" style={{ minWidth: 220 }}>
             <label>Item</label>
-            <select value={ingredientId} onChange={(e) => setIngredientId(e.target.value)} style={{ minWidth: 180 }}>
-              <option value="">— choose —</option>
-              {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
+            <IngredientSelect
+              ingredients={ingredients}
+              value={ingredientId}
+              onPick={(id) => setIngredientId(id)}
+              placeholder="Search item (Tamil or English)…"
+            />
           </div>
           <div className="field">
             <label>Month</label>
