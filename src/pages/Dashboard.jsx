@@ -342,7 +342,7 @@ export default function Dashboard() {
                           <td className="num">{m.market ? inr(m.market.modalPerKg) : <span className="muted" style={{ fontSize: 12 }}>{m.reasonLabel}</span>}</td>
                           <td className="muted" style={{ fontSize: 12 }}>
                             {m.market ? (
-                              <>{m.market.market}{m.market.tier === 'tamil_nadu' && <span style={{ color: '#a5471f' }}> (other TN market)</span>} · {m.market.date}</>
+                              <>{m.market.market}{m.market.tier === 'near_koviloor' && <span style={{ color: '#a5471f' }}> (near Koviloor)</span>}{m.market.tier === 'tamil_nadu' && <span style={{ color: '#a5471f' }}> (other TN market)</span>} · {m.market.date}</>
                             ) : '—'}
                           </td>
                           <td className="num" style={{ fontWeight: 700, color: m.gapPct == null ? undefined : (m.gapPct >= 0 ? '#c0392b' : '#3f7a34') }}>
@@ -354,7 +354,7 @@ export default function Dashboard() {
                   </table>
                 </div>
                 <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-                  "Your last rate" is the price from your most recent purchase of that item, whatever month it was in — compared against the mandi's most recently reported price. Prefers markets near Koviloor (Sivaganga, Madurai, Tiruchirappalli, Pudukkottai, Ramanathapuram), and only falls to other Tamil Nadu markets as a last resort — labelled "(other TN market)". This is a wholesale mandi price — your vendor rate naturally runs higher (retail delivery, handling, margin). Treat a large or sudden gap as worth a look, not proof of overcharging. Source: Agmarknet / data.gov.in.
+                  "Your last rate" is the price from your most recent purchase of that item, whatever month it was in — compared against the mandi's most recently reported price. Prefers Karaikudi's own market first; if that item wasn't reported there, uses the nearest available market around Koviloor (Sivaganga, Madurai, Tiruchirappalli, Pudukkottai, Ramanathapuram), and only falls further to other Tamil Nadu markets as a last resort — each labelled accordingly. This is a wholesale mandi price — your vendor rate naturally runs higher (retail delivery, handling, margin). Treat a large or sudden gap as worth a look, not proof of overcharging. Source: Agmarknet / data.gov.in.
                 </div>
                 {marketDebug && (
                   <details style={{ marginTop: 8, fontSize: 11 }}>

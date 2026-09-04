@@ -584,6 +584,8 @@ function UnpaidView() {
   const [selBills, setSelBills] = useState(() => new Set());
   const [payDate, setPayDate] = useState(todayISO());
   const [debitAcct, setDebitAcct] = useState(() => { try { return localStorage.getItem('kal_debit_account') || ''; } catch { return ''; } });
+  const [neftDebitAcct, setNeftDebitAcct] = useState(() => { try { return localStorage.getItem('kal_neft_debit_account') || ''; } catch { return ''; } });
+  function saveNeftDebit(v) { const s = v.replace(/[^0-9]/g, '').slice(0, 20); setNeftDebitAcct(s); try { localStorage.setItem('kal_neft_debit_account', s); } catch {} }
   function saveDebit(v) {
     const d = String(v).replace(/[^0-9]/g, '').slice(0, 12);
     setDebitAcct(d);
@@ -750,6 +752,49 @@ function UnpaidView() {
     if (missing.length) alert(`Payment file created for ${ready.length} vendor(s) (${ready.filter((r) => r[0] === 'WIB').length} WIB · ${ready.filter((r) => r[0] === 'NFT').length} NFT).\n\nLeft out — no Bene ID (register in CIB first): ${missing.join(', ')}.`);
   }
 
+  // Excel date serial (days since 1899-12-30) — matches the numeric PYMT_DATE format
+  // seen in the bank's own template (e.g. 04-Sep-2026 -> 46269).
+  function excelDateSerial(d) {
+    const epoch = Date.UTC(1899, 11, 30);
+    return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - epoch) / 86400000);
+  }
+
+  async function downloadNeftBankFile() {
+    const acct = String(neftDebitAcct || '').replace(/[^0-9]/g, '');
+    if (!acct) { alert('Enter the debit account number (Bank file section) before exporting.'); return; }
+
+    const ready = []; const missing = [];
+    const paymentDate = excelDateSerial(new Date());
+    const narr = `Purchases ${new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`;
+    [...groups].sort((a, b) => a.vendorName.localeCompare(b.vendorName)).forEach((g) => {
+      const v = vendorsById[g.vendorId] || {};
+      const beneAcct = String(v.bankAccount || '').trim();
+      const ifsc = String(v.bankIfsc || '').toUpperCase().trim();
+      if (!beneAcct || !ifsc) { missing.push(g.vendorName); return; }
+      ready.push([
+        'PAB_VENDOR', 'NEFT', acct, g.vendorName, beneAcct, ifsc,
+        Math.round((Number(g.totalAmount) || 0) * 100) / 100,
+        '', narr, v.phone || '', '', '', paymentDate, '', '', '', '', '', '',
+      ]);
+    });
+
+    if (ready.length === 0) { alert('No vendors have both a bank account number and IFSC yet. Add these on the Vendors page first.'); return; }
+
+    const XLSX = await import('xlsx');
+    const header = [
+      'PYMT_PROD_TYPE_CODE', 'PYMT_MODE', 'DEBIT_ACC_NO', 'BNF_NAME', 'BENE_ACC_NO', 'BENE_IFSC',
+      'AMOUNT', 'DEBIT_NARR', 'CREDIT_NARR', 'MOBILE_NUM', 'EMAIL_ID', 'REMARK', 'PYMT_DATE', 'REF_NO',
+      'ADDL_INFO1', 'ADDL_INFO2', 'ADDL_INFO3', 'ADDL_INFO4', 'ADDL_INFO5',
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([header, ...ready]);
+    ws['!cols'] = header.map((h) => ({ wch: Math.max(12, h.length) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, 'Koviloor-NEFT-payment.xls', { bookType: 'biff8' });
+
+    if (missing.length) alert(`Payment file created for ${ready.length} vendor(s).\n\nLeft out — missing bank account/IFSC (add on Vendors page): ${missing.join(', ')}.`);
+  }
+
   if (loading) return <div className="empty">Loading outstanding bills…</div>;
   if (groups.length === 0) return <div className="card"><div className="empty">🎉 Nothing outstanding — every bill is settled.</div></div>;
 
@@ -769,6 +814,11 @@ function UnpaidView() {
             <input value={debitAcct} onChange={(e) => saveDebit(e.target.value)} inputMode="numeric" placeholder="012345678901" style={{ width: 150, fontFamily: 'var(--mono)' }} maxLength={12} />
           </div>
           <button className="btn btn-ghost btn-sm" onClick={downloadBankFile} title="ICICI CIB payment file (.xls) for all outstanding vendors">🏦 Bank file (CIB)</button>
+          <div className="field" style={{ flex: 'none' }}>
+            <label>NEFT debit a/c</label>
+            <input value={neftDebitAcct} onChange={(e) => saveNeftDebit(e.target.value)} inputMode="numeric" placeholder="051905001687" style={{ width: 150, fontFamily: 'var(--mono)' }} maxLength={20} />
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={downloadNeftBankFile} title="NEFT vendor-payment upload file (.xls) for all outstanding vendors">🏦 Bank file (NEFT)</button>
           <ReportActions filename="koviloor-outstanding" printSheetId="ps-unpaid" excelSheets={excelSheets} />
         </div>
       </div>

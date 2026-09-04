@@ -11,10 +11,10 @@
 // Ramanathapuram); fall back to any Tamil Nadu market only if nothing nearby
 // has reported, and say so plainly (market name + a "fallback" flag).
 const RESOURCE_ID = '9ef84268-d588-465a-a308-a864a43d0070';
-// Koviloor Kitchen (Sanatana Dharma Trust) is near Karaikudi, in Sivaganga district,
-// between Madurai and Tiruchirappalli (Trichy). There's no single flagship wholesale
-// market the way Chennai has Koyambedu, so the first-choice tier is these nearby
-// districts' farmers' markets (Uzhavar Sandhai) rather than one named market.
+// Koviloor Kitchen (Sanatana Dharma Trust) is right by Karaikudi -- so Karaikudi's
+// own market is checked FIRST when it has reported. If not, the wider nearby
+// districts are tried, then all of Tamil Nadu as a last resort.
+const PRIORITY_MARKET = 'Karaikudi';
 const NEAR_DISTRICTS = ['Sivaganga', 'Madurai', 'Thiruchirappalli', 'Tiruchirappalli', 'Pudukkottai', 'Ramanathapuram'];
 const CONCURRENCY = 6; // how many commodities to query at once -- fast enough to stay under serverless time limits
 
@@ -117,12 +117,19 @@ export default async function handler(req, res) {
 
     await runThrottled(toFetch, async function (commodity) {
       try {
-        const r1 = await queryOnce(apiKey, { 'filters[state.keyword]': 'Tamil Nadu', 'filters[commodity]': commodity }, NEAR_DISTRICTS);
-        let usedMarket = r1.latest ? (r1.latest.market || 'Near Koviloor (other market)') : null;
-        let usedTier = 'near_koviloor';
-        let latest = r1.latest;
-        debug[commodity] = { nearRawCount: r1.rawCount };
+        const r0 = await queryOnce(apiKey, { 'filters[market]': PRIORITY_MARKET, 'filters[commodity]': commodity });
+        let usedMarket = PRIORITY_MARKET;
+        let usedTier = 'karaikudi';
+        let latest = r0.latest;
+        debug[commodity] = { karaikudiRawCount: r0.rawCount };
 
+        if (!latest) {
+          const r1 = await queryOnce(apiKey, { 'filters[state.keyword]': 'Tamil Nadu', 'filters[commodity]': commodity }, NEAR_DISTRICTS);
+          debug[commodity].nearRawCount = r1.rawCount;
+          latest = r1.latest;
+          usedTier = 'near_koviloor';
+          usedMarket = latest ? (latest.market || 'Near Koviloor (other market)') : null;
+        }
         if (!latest) {
           const r2 = await queryOnce(apiKey, { 'filters[state.keyword]': 'Tamil Nadu', 'filters[commodity]': commodity });
           debug[commodity].tnRawCount = r2.rawCount;
@@ -133,7 +140,7 @@ export default async function handler(req, res) {
         if (!latest) { results[commodity] = { ok: false, reason: 'no_data' }; return null; }
         results[commodity] = {
           ok: true, date: toISO(latest.date), variety: latest.variety, market: usedMarket, tier: usedTier,
-          fallback: usedTier !== 'near_koviloor',
+          fallback: usedTier !== 'karaikudi',
           minPerKg: Math.round((latest.min / 100) * 100) / 100,
           maxPerKg: Math.round((latest.max / 100) * 100) / 100,
           modalPerKg: Math.round((latest.modal / 100) * 100) / 100,
