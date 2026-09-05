@@ -269,7 +269,7 @@ function MonthView({ setView }) {
           </div>
       <div className="print-onebill-wrap">
         {oneBill && (
-          <PrintSheet id="ps-onebill" title={`Bill ${oneBill.bill.billNo || ''}`} period={`${oneBill.vendorName} · ${prettyDate(oneBill.bill.billDate)}`} rows={[]} billGroups={oneBillGroups} billwiseLabel="" />
+          <PrintSheet id="ps-onebill" title={`Bill ${oneBill.bill.billNo || ''}`} period={`${oneBill.vendorName} · ${prettyDate(oneBill.bill.billDate)}`} rows={[]} billGroups={oneBillGroups} billwiseLabel="" billwisePageBreak={false} />
         )}
       </div>
 

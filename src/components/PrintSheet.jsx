@@ -1,7 +1,7 @@
 // Certified-ledger print layout, modelled on the Kashi/Annakshetra vendor ledger.
 // `detail` (optional) renders a per-vendor date-wise section after the abstract:
 //   detail = { columns:[{header,key,align}], groups:[{ vendor, rows:[...], total:{...} }] }
-export default function PrintSheet({ id, title, period, columns, rows, total, note, sign = true, detail, detailLabel = 'Vendor-wise Bill Detail', detailPageBreak = false, billGroups, billwiseLabel = 'Vendor-wise Bill Detail (itemised)' }) {
+export default function PrintSheet({ id, title, period, columns, rows, total, note, sign = true, detail, detailLabel = 'Vendor-wise Bill Detail', detailPageBreak = false, billGroups, billwiseLabel = 'Vendor-wise Bill Detail (itemised)', billwisePageBreak = true }) {
   const cls = (c) => (c.align === 'right' ? 'r' : '');
   const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   return (
@@ -68,7 +68,7 @@ export default function PrintSheet({ id, title, period, columns, rows, total, no
         <div className="ps-detail">
           {billwiseLabel && <div className="ps-section-label">{billwiseLabel}</div>}
           {billGroups.map((g, gi) => (
-            <div className="ps-vendor ps-vendor-page" key={gi}>
+            <div className={billwisePageBreak ? 'ps-vendor ps-vendor-page' : 'ps-vendor'} key={gi}>
               <div className="ps-vendor-name">{g.vendor}<span className="r" style={{ float: 'right' }}>{g.vendorTotal}</span></div>
               {g.bills.map((b, bi) => (
                 <div className="ps-bill" key={bi}>
