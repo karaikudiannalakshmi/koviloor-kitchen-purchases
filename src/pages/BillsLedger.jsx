@@ -197,12 +197,14 @@ function MonthView({ setView }) {
   const [oneBill, setOneBill] = useState(null); // { bill, vendorName }
   useEffect(() => {
     if (!oneBill) return undefined;
+    let cancelled = false;
     const t = setTimeout(async () => {
       const { printCertified } = await import('../lib/exporters');
+      const clear = () => { if (!cancelled) setOneBill(null); window.removeEventListener('afterprint', clear); };
+      window.addEventListener('afterprint', clear);
       printCertified('printing-onebill');
-      setOneBill(null);
     }, 60);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [oneBill]);
   function printBill(bill, vendorName) { setOneBill({ bill, vendorName }); }
   async function exportBill(bill, vendorName) {
@@ -225,7 +227,7 @@ function MonthView({ setView }) {
 
   return (
     <>
-      <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} note="Abstract on the first page; each vendor's itemised bills follow, one vendor per page." billGroups={buildBillwise(combinedGroups)} billwiseLabel="Vendor-wise Bills (itemised)" />
+      <PrintSheet id="ps-bills" title={printMode?.scope === 'selected' ? 'Purchase Bills — Selected Vendors' : 'Certified Purchase Bills'} period={prettyMonth(month)} columns={cSummary.columns} rows={cSummary.rows} total={cSummary.total} note="Abstract followed by each vendor's itemised bills." billGroups={buildBillwise(combinedGroups)} billwiseLabel="Vendor-wise Bills (itemised)" billwisePageBreak={false} />
 
       <div className="print-individual-wrap">
         {individualGroups.map((g, i) => {
@@ -839,7 +841,7 @@ function UnpaidView() {
 
   return (
     <>
-      <PrintSheet id="ps-unpaid" title="Outstanding Bills — Settlement" period={`As on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`} columns={summary.columns} rows={summary.rows} total={summary.total} note="Abstract on the first page; each vendor's itemised bills follow, one vendor per page." billGroups={billwiseDetail()} billwiseLabel="Vendor-wise Bills (itemised)" />
+      <PrintSheet id="ps-unpaid" title="Outstanding Bills — Settlement" period={`As on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`} columns={summary.columns} rows={summary.rows} total={summary.total} note="Abstract followed by each vendor's itemised bills." billGroups={billwiseDetail()} billwiseLabel="Vendor-wise Bills (itemised)" billwisePageBreak={false} />
 
       <div className="page-head" style={{ marginBottom: 12 }}>
         <div className="sub">Outstanding across all months</div>
