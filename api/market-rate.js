@@ -27,12 +27,20 @@ const PRIORITY_MARKET = 'Karaikudi';
 const NEAR_DISTRICTS = ['Sivaganga', 'Madurai', 'Tiruchirappalli', 'Pudukkottai', 'Ramanathapuram'];
 const CONCURRENCY = 6; // how many commodities to query at once -- keep gentle on the shared API
 
-export const config = { maxDuration: 30 };
+// Run this function from Vercel's Mumbai region instead of the US default.
+// Indian government sites commonly block/drop connections from foreign
+// datacenter IP ranges (which is what a US-region Vercel function looks like
+// to them) while allowing connections that originate from India -- this is a
+// strong second suspect now that browser-like headers alone didn't fix it.
+export const config = { maxDuration: 30, regions: ['bom1'] };
 
 async function fetchJson(url) {
   let r;
+  const ac = new AbortController();
+  const killer = setTimeout(() => ac.abort(), 12000); // don't let one bad connection eat the whole function budget
   try {
     r = await fetch(url, {
+      signal: ac.signal,
       headers: {
         // Node's default fetch() sends almost no headers, which some government
         // anti-bot/WAF filters silently reject (drop the connection) rather than
@@ -42,9 +50,19 @@ async function fetchJson(url) {
       },
     });
   } catch (networkErr) {
-    const e = new Error('fetch failed: ' + (networkErr && networkErr.message));
+    // Node's fetch (undici) wraps the *real* network error inside `.cause` and
+    // gives every failure the same useless top-level message "fetch failed" --
+    // so we have to dig into .cause to see the actual reason (ECONNREFUSED,
+    // ENOTFOUND, ETIMEDOUT, a TLS/certificate error, an abort, etc).
+    const cause = networkErr && networkErr.cause;
+    const detail = ac.signal.aborted
+      ? 'timeout (no response within 12s)'
+      : (cause && (cause.code || cause.message)) || (networkErr && networkErr.message) || 'unknown';
+    const e = new Error('fetch failed: ' + detail);
     e.code = 'fetch_failed';
     throw e;
+  } finally {
+    clearTimeout(killer);
   }
   if (r.status === 429) { const e = new Error('rate_limited'); e.code = 'rate_limited'; throw e; }
   if (!r.ok) { const e = new Error(`HTTP ${r.status}`); e.code = 'http_' + r.status; throw e; }
