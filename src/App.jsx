@@ -11,6 +11,7 @@ import BillEntry from './pages/BillEntry';
 import BillsLedger from './pages/BillsLedger';
 import IngredientLedger from './pages/IngredientLedger';
 import DailyLog from './pages/DailyLog';
+import Variance from './pages/Variance';
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -33,6 +34,7 @@ function AppRoutes() {
       <Route path="/bills/:id/edit" element={<Protected><BillEntry /></Protected>} />
       <Route path="/bills" element={<Protected><BillsLedger /></Protected>} />
       <Route path="/ledger" element={<Protected><IngredientLedger /></Protected>} />
+      <Route path="/variance" element={<Protected><Variance /></Protected>} />
       <Route path="/daily-log" element={<Protected><DailyLog /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
