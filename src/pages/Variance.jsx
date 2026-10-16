@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { billsInRange, rollupByIngredient } from '../lib/db';
 import { computeVariance, sumRows } from '../lib/variance';
+import { loadMerges, saveMerges, applyMerges } from '../lib/varianceMerges';
 import ReportActions from '../components/ReportActions';
 import PrintSheet from '../components/PrintSheet';
 import { inr, qty, prettyMonth, shortMonth, currentMonthKey, lastNMonths, monthRange } from '../lib/format';
@@ -30,6 +31,20 @@ export default function Variance() {
   const [minPct, setMinPct] = useState(0);
   const [onlyMoved, setOnlyMoved] = useState(false);
   const [q, setQ] = useState('');
+  const [pairs, setPairs] = useState([]); // renamed-item pairs (old name folded into new name)
+  const [mergeBusy, setMergeBusy] = useState(false);
+  useEffect(() => { loadMerges().then(setPairs); }, []);
+  async function persist(next) {
+    setMergeBusy(true);
+    try { await saveMerges(next); setPairs(next); } catch (e) { alert('Could not save: ' + (e.message || e)); }
+    setMergeBusy(false);
+  }
+  const addPair = (o, n) => persist([...pairs.filter((x) => x.fromKey !== o.key), { fromKey: o.key, toKey: n.key, fromName: o.name, toName: n.name }]);
+  const removePair = (p) => persist(pairs.filter((x) => !(x.fromKey === p.fromKey && x.toKey === p.toKey)));
+  const mergedChip = (r) => {
+    const from = pairs.filter((p) => p.toKey === r.key).map((p) => p.fromName);
+    return from.length ? <span className="chip" style={{ marginLeft: 6, background: 'var(--paper-2)' }} title={`Combined with: ${from.join(', ')}`}>⇄ {from.join(', ')}</span> : null;
+  };
 
   const months = useMemo(() => lastNMonths(endMonth, 3), [endMonth]);
 
@@ -47,10 +62,10 @@ export default function Variance() {
 
   const { all, others } = useMemo(() => {
     if (!rollups) return { all: [], others: 0 };
-    const { rows } = computeVariance(rollups);
+    const { rows } = computeVariance(applyMerges(rollups, pairs));
     const keep = rows.filter((r) => CLASSES.some((c) => c.key === r.category));
     return { all: keep, others: rows.length - keep.length };
-  }, [rollups]);
+  }, [rollups, pairs]);
 
   const visible = useMemo(() => all.filter((r) => {
     if (q && !r.name.toLowerCase().includes(q.toLowerCase())) return false;
@@ -61,6 +76,13 @@ export default function Variance() {
     }
     return true;
   }), [all, q, onlyMoved, minPct]);
+
+  const pickList = [...all].sort((a, b) => {
+    const rank = (r) => (r.status === 'stopped' ? 0 : r.status === 'new' ? 1 : 2);
+    return rank(a) - rank(b) || a.name.localeCompare(b.name);
+  });
+  const hasStopped = all.some((r) => r.status === 'stopped');
+  const hasNew = all.some((r) => r.status === 'new');
 
   const byClass = CLASSES.map((c) => {
     const rows = visible.filter((r) => r.category === c.key);
@@ -167,6 +189,8 @@ export default function Variance() {
         </div>
       )}
 
+      <RenamePanel pairs={pairs} items={pickList} nameOf={(r) => r.name} onAdd={addPair} onRemove={removePair} hint={hasStopped && hasNew} busy={mergeBusy} />
+
       {/* ---- Summary by class ---- */}
       <div className="stats" style={{ marginBottom: 18 }}>
         {[...byClass.map((c) => ({ label: c.label, t: c.fullTot })), { label: 'Grocery + Vegetable', t: grand }].map(({ label: l, t }) => (
@@ -209,7 +233,7 @@ export default function Variance() {
                 ) : c.rows.map((r) => (
                   <tr key={r.key}>
                     <td style={{ fontWeight: 600, position: 'sticky', left: 0, background: 'var(--card)' }}>
-                      {r.name} <span className="muted" style={{ fontWeight: 400 }}>/{r.unit}</span>
+                      {r.name} <span className="muted" style={{ fontWeight: 400 }}>/{r.unit}</span>{mergedChip(r)}
                       {r.status === 'new' && <span className="chip unpaid" style={{ marginLeft: 6 }}>new</span>}
                       {r.status === 'stopped' && <span className="chip" style={{ marginLeft: 6, background: 'var(--paper-2)' }}>not bought</span>}
                     </td>
@@ -252,5 +276,63 @@ export default function Variance() {
         {others > 0 && ` ${others} item(s) in other categories are not shown.`}
       </div>
     </>
+  );
+}
+
+/* ---------- Renamed / rebranded items: tell the report two names are one product ---------- */
+function RenamePanel({ pairs, items, nameOf, onAdd, onRemove, hint, busy }) {
+  const [open, setOpen] = useState(false);
+  const [oldK, setOldK] = useState('');
+  const [newK, setNewK] = useState('');
+  const o = items.find((i) => i.key === oldK);
+  const n = items.find((i) => i.key === newK);
+  const unitWarn = o && n && o.unit !== n.unit;
+  const tag = (r) => (r.status === 'stopped' ? ' · not bought this month' : r.status === 'new' ? ' · new this month' : '');
+  const opt = (r) => <option key={r.key} value={r.key}>{nameOf(r)} /{r.unit}{tag(r)}</option>;
+  return (
+    <div className="card card-pad" style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, cursor: 'pointer', flexWrap: 'wrap' }} onClick={() => setOpen(!open)}>
+        <b>Renamed / rebranded items</b>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {pairs.length ? `${pairs.length} combined` : 'none combined yet'}{hint && !pairs.length ? ' · some items may need matching' : ''} {open ? '▲' : '▼'}
+        </span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+            If a product changed its name or brand, the old name shows as “not bought” and the new name as “new”, which hides the real variance.
+            Pick the <b>old name</b> and the <b>new name</b> below to treat them as one item — quantities and amounts are added together under the new name.
+            Your bills and ingredient list are not changed.
+          </div>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <div className="field" style={{ flex: 1 }}><label>Old name</label>
+              <select value={oldK} onChange={(e) => setOldK(e.target.value)}>
+                <option value="">— choose —</option>
+                {items.map(opt)}
+              </select></div>
+            <div className="field" style={{ flex: 1 }}><label>New name (kept)</label>
+              <select value={newK} onChange={(e) => setNewK(e.target.value)}>
+                <option value="">— choose —</option>
+                {items.filter((i) => i.key !== oldK).map(opt)}
+              </select></div>
+            <button className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-end' }} disabled={!o || !n || busy}
+              onClick={() => { onAdd(o, n); setOldK(''); setNewK(''); }}>Treat as same item</button>
+          </div>
+          {unitWarn && <div style={{ fontSize: 12.5, color: 'var(--terracotta, #b4432a)', marginBottom: 8 }}>⚠ Units differ ({o.unit} vs {n.unit}) — only combine if the quantities are in the same unit.</div>}
+          {pairs.length > 0 && (
+            <table style={{ fontSize: 13 }}>
+              <tbody>
+                {pairs.map((p) => (
+                  <tr key={p.fromKey + '>' + p.toKey}>
+                    <td>{p.fromName} <span className="muted">→</span> <b>{p.toName}</b></td>
+                    <td style={{ width: 1 }}><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => onRemove(p)}>Undo</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
