@@ -218,14 +218,22 @@ export default function Variance() {
         ))}
       </div>
 
+      <style>{VAR_CSS}</style>
+      {!loading && (
+        <div className="muted" style={{ fontSize: 12.5, margin: '0 0 8px', lineHeight: 1.6 }}>
+          <b style={{ color: 'var(--terracotta, #b4432a)' }}>Red</b> = spending went <b>up</b> against the baseline &nbsp;·&nbsp;
+          <b style={{ color: 'var(--veg, #4f7a34)' }}>Green</b> = spending went <b>down</b>. &nbsp;
+          <b>Quantity</b> = effect of buying more/less; <b>Price</b> = effect of paying more/less per unit; <b>Total</b> = both together.
+        </div>
+      )}
       {loading ? <div className="card card-pad muted">Loading {months.map(prettyMonth).join(', ')}…</div> : byClass.map((c) => (
         <div key={c.key} style={{ marginBottom: 22 }}>
           <h2 style={{ fontSize: 20, margin: '4px 0 8px' }}>{c.label} <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}>· {c.rows.length} items</span></h2>
-          <div className="card table-wrap">
-            <table style={{ fontSize: 13 }}>
+          <div className="card table-wrap var-wrap">
+            <table className="var-table" style={{ fontSize: 13 }}>
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>Ingredient</th>
+                  <th rowSpan={2} className="var-name">Ingredient</th>
                   {months.map((mk) => <th key={mk} colSpan={2} className="num" style={{ textAlign: 'center' }}>{label(mk)}</th>)}
                   <th colSpan={2} className="num" style={{ textAlign: 'center' }}>Baseline ({baseLabel})</th>
                   <th colSpan={2} className="num" style={{ textAlign: 'center' }}>Change in {label(m3)}</th>
@@ -242,7 +250,7 @@ export default function Variance() {
                   <tr><td colSpan={COLS} className="empty">Nothing to show for these months / filters.</td></tr>
                 ) : c.rows.map((r) => (
                   <tr key={r.key}>
-                    <td style={{ fontWeight: 600, position: 'sticky', left: 0, background: 'var(--card)' }}>
+                    <td className="var-name" style={{ fontWeight: 600 }}>
                       {r.name} <span className="muted" style={{ fontWeight: 400 }}>/{r.unit}</span>{mergedChip(r)}
                       {r.status === 'new' && <span className="chip unpaid" style={{ marginLeft: 6 }}>new</span>}
                       {r.status === 'stopped' && <span className="chip" style={{ marginLeft: 6, background: 'var(--paper-2)' }}>not bought</span>}
@@ -262,7 +270,7 @@ export default function Variance() {
               {c.rows.length > 0 && (
                 <tfoot>
                   <tr style={{ background: 'var(--paper-2)', fontWeight: 700 }}>
-                    <td style={{ padding: '12px 14px' }}>{c.label} total</td>
+                    <td className="var-name" style={{ padding: '12px 14px' }}>{c.label} total</td>
                     <td colSpan={6} className="num muted" style={{ fontWeight: 400 }}>
                       spend: {c.tot.monthAmounts.map((a, i) => `${label(months[i])} ${inr(a, 0)}`).join(' · ')}
                     </td>
@@ -363,3 +371,16 @@ function RenamePanel({ pairs, items, nameOf, onAdd, onRemove, hint, busy }) {
     </div>
   );
 }
+
+// Keeps the column headings and the ingredient name in view while scrolling a long, wide table.
+const VAR_CSS = `
+.var-wrap { max-height: 72vh; overflow: auto; }
+.var-table { border-collapse: separate; border-spacing: 0; }
+.var-table thead th { position: sticky; top: 0; z-index: 3; height: 34px; padding-top: 0; padding-bottom: 0; }
+.var-table thead tr:nth-child(2) th { top: 34px; }
+.var-table th.var-name, .var-table td.var-name { position: sticky; left: 0; min-width: 190px; box-shadow: 1px 0 0 var(--line); }
+.var-table td.var-name { background: var(--card); z-index: 2; }
+.var-table thead th.var-name { background: var(--paper-2); z-index: 5; top: 0; }
+.var-table tbody tr:hover td.var-name { background: #fffaf0; }
+.var-table tfoot td.var-name { background: var(--paper-2); }
+`;
