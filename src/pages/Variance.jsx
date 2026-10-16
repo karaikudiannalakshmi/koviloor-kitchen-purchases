@@ -34,6 +34,8 @@ export default function Variance() {
   const [sortBy, setSortBy] = useState('variance'); // 'variance' | 'name'
   const [pairs, setPairs] = useState([]); // renamed-item pairs (old name folded into new name)
   const [mergeBusy, setMergeBusy] = useState(false);
+  const [basis, setBasis] = useState('avg'); // 'avg' = average of earlier months, 'prev' = previous month only
+  const [billInfo, setBillInfo] = useState(null); // per month: bill count, drafts, bill-ledger total
   useEffect(() => { loadMerges().then(setPairs); }, []);
   async function persist(next) {
     setMergeBusy(true);
@@ -55,18 +57,24 @@ export default function Variance() {
       setLoading(true);
       const bills = (await billsInRange(monthRange(months[0]).first, monthRange(months[2]).last))
         .filter((b) => b.status !== 'draft'); // drafts have no prices yet
+      const allB = await billsInRange(monthRange(months[0]).first, monthRange(months[2]).last);
+      const info = months.map((mk) => {
+        const bs = allB.filter((b) => (b.monthKey || (b.billDate || '').slice(0, 7)) === mk);
+        const fin = bs.filter((b) => b.status !== 'draft');
+        return { bills: fin.length, drafts: bs.length - fin.length, billTotal: fin.reduce((s, b) => s + (Number(b.totalAmount) || 0), 0) };
+      });
       const buckets = months.map((mk) => bills.filter((b) => (b.monthKey || (b.billDate || '').slice(0, 7)) === mk));
-      if (alive) { setRollups(buckets.map((bs) => rollupByIngredient(bs))); setLoading(false); }
+      if (alive) { setBillInfo(info); setRollups(buckets.map((bs) => rollupByIngredient(bs).map((r) => ({ ...r, name: (r.name || '').replace(/\s+—\s+[A-Za-z]{3},\s*\d{1,2}\s+[A-Za-z]{3}$/, '') })))); setLoading(false); }
     })();
     return () => { alive = false; };
   }, [months]);
 
   const { all, others } = useMemo(() => {
     if (!rollups) return { all: [], others: 0 };
-    const { rows } = computeVariance(applyMerges(rollups, pairs));
+    const { rows } = computeVariance(applyMerges(rollups, pairs), basis);
     const keep = rows.filter((r) => CLASSES.some((c) => c.key === r.category));
     return { all: keep, others: rows.length - keep.length };
-  }, [rollups, pairs]);
+  }, [rollups, pairs, basis]);
 
   const visible = useMemo(() => all.filter((r) => {
     if (q && !r.name.toLowerCase().includes(q.toLowerCase())) return false;
@@ -98,7 +106,7 @@ export default function Variance() {
 
   const [m1, m2, m3] = months;
   const label = (mk) => shortMonth(mk);
-  const baseLabel = `${label(m1)}–${label(m2)} avg`;
+  const baseLabel = basis === 'prev' ? `${label(m2)} only` : `${label(m1)}–${label(m2)} avg`;
 
   /* ---------- exports ---------- */
   const excelCols = [
@@ -179,6 +187,11 @@ export default function Variance() {
       <div className="toolbar">
         <div className="field"><label>Latest month (3-month window ends)</label>
           <input type="month" value={endMonth} onChange={(e) => e.target.value && setEndMonth(e.target.value)} /></div>
+        <div className="field"><label>Compare with</label>
+          <select value={basis} onChange={(e) => setBasis(e.target.value)}>
+            <option value="avg">Average of earlier months</option>
+            <option value="prev">Previous month only</option>
+          </select></div>
         <div className="field"><label>Hide variance below %</label>
           <input type="number" min="0" step="5" value={minPct} onChange={(e) => setMinPct(Number(e.target.value) || 0)} style={{ width: 90 }} /></div>
         <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingBottom: 8 }}>
@@ -200,6 +213,35 @@ export default function Variance() {
       )}
 
       <RenamePanel pairs={pairs} items={pickList} nameOf={(r) => r.name} onAdd={addPair} onRemove={removePair} hint={hasStopped && hasNew} busy={mergeBusy} />
+
+      {/* ---- Month totals (reconcile with the Bills Ledger) ---- */}
+      {billInfo && !loading && (
+        <div className="card card-pad" style={{ marginBottom: 14, overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 13.5 }}>
+            <thead><tr><th style={{ textAlign: 'left' }}>Month</th><th className="num">Grocery</th><th className="num">Vegetable</th><th className="num">Grocery + Veg</th><th className="num">Other items</th><th className="num">Bills ledger total</th><th className="num">Bills</th></tr></thead>
+            <tbody>
+              {months.map((mk, i) => {
+                const g = grand.monthAmounts[i];
+                const per = byClass.map((c) => c.fullTot.monthAmounts[i]);
+                const bi = billInfo[i];
+                return (
+                  <tr key={mk}>
+                    <td><b>{label(mk)}</b></td>
+                    {per.map((x, j) => <td key={j} className="num">{inr(x, 0)}</td>)}
+                    <td className="num"><b>{inr(g, 0)}</b></td>
+                    <td className="num">{inr(Math.max(0, bi.billTotal - g), 0)}</td>
+                    <td className="num">{inr(bi.billTotal, 0)}</td>
+                    <td className="num">{bi.bills}{bi.drafts ? ` (+${bi.drafts} draft)` : ''}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            Item totals include GST. The baseline is the {basis === 'prev' ? 'previous month' : 'average of the earlier months'}, so when a month swings up and down the average can hide it — use “Previous month only” to see the month-to-month change.
+          </div>
+        </div>
+      )}
 
       {/* ---- Summary by class ---- */}
       <div className="stats" style={{ marginBottom: 18 }}>
@@ -289,7 +331,7 @@ export default function Variance() {
       ))}
 
       <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
-        <b>How to read this.</b> Baseline = average monthly quantity of the two earlier months, at their quantity-weighted average rate. Variance = {prettyMonth(m3)} spend minus baseline spend; red = spent more, green = spent less.
+        <b>How to read this.</b> Baseline = {basis === 'prev' ? 'the previous month' : 'the average monthly quantity of the two earlier months'}, at their quantity-weighted average rate. Variance = {prettyMonth(m3)} spend minus baseline spend; red = spent more, green = spent less.
         {' '}<b>Quantity effect</b> shows how much of the change is simply buying more or less; <b>Price effect</b> shows how much is paying more or less per unit — together they add up exactly to the total. Rates include GST. Draft bills are excluded.
         {others > 0 && ` ${others} item(s) in other categories are not shown.`}
       </div>

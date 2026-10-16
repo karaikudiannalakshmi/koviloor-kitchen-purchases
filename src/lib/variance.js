@@ -17,10 +17,10 @@
 
 const keyOf = (r) => r.ingredientId || r.name;
 
-export function computeVariance(monthRollups) {
+export function computeVariance(monthRollups, basis = 'avg') {
   const n = monthRollups.length;
   if (n < 2) return { rows: [], totals: {} };
-  const k = n - 1; // number of baseline months
+  const k = basis === 'prev' ? 1 : n - 1; // number of baseline months
 
   const index = monthRollups.map((arr) => {
     const m = new Map();
@@ -42,7 +42,7 @@ export function computeVariance(monthRollups) {
         : { qty: 0, amount: 0, rate: 0 };
     });
 
-    const prior = months.slice(0, k);
+    const prior = months.slice(n - 1 - k, n - 1);
     const cur = months[k];
     const priorQty = prior.reduce((s, m) => s + m.qty, 0);
     const priorAmt = prior.reduce((s, m) => s + m.amount, 0);
