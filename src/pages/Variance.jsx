@@ -31,6 +31,7 @@ export default function Variance() {
   const [minPct, setMinPct] = useState(0);
   const [onlyMoved, setOnlyMoved] = useState(false);
   const [q, setQ] = useState('');
+  const [sortBy, setSortBy] = useState('variance'); // 'variance' | 'name'
   const [pairs, setPairs] = useState([]); // renamed-item pairs (old name folded into new name)
   const [mergeBusy, setMergeBusy] = useState(false);
   useEffect(() => { loadMerges().then(setPairs); }, []);
@@ -84,8 +85,12 @@ export default function Variance() {
   const hasStopped = all.some((r) => r.status === 'stopped');
   const hasNew = all.some((r) => r.status === 'new');
 
+  const sortRows = (rs) => (sortBy === 'name'
+    ? [...rs].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    : rs);
+
   const byClass = CLASSES.map((c) => {
-    const rows = visible.filter((r) => r.category === c.key);
+    const rows = sortRows(visible.filter((r) => r.category === c.key));
     const allRows = all.filter((r) => r.category === c.key);
     return { ...c, rows, tot: sumRows(rows, 3), fullTot: sumRows(allRows, 3) };
   });
@@ -179,6 +184,11 @@ export default function Variance() {
         <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingBottom: 8 }}>
           <input type="checkbox" checked={onlyMoved} onChange={(e) => setOnlyMoved(e.target.checked)} /> Only items with a variance
         </label>
+        <div className="field"><label>Sort by</label>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="variance">Biggest variance first</option>
+            <option value="name">Name A–Z</option>
+          </select></div>
         <div className="field" style={{ flex: 1 }}><label>Search</label><input placeholder="ingredient…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <ReportActions filename={`Variance-${m3}`} printSheetId="ps-variance" excelSheets={excelSheets()} disabled={loading || visible.length === 0} />
       </div>
@@ -280,6 +290,30 @@ export default function Variance() {
 }
 
 /* ---------- Renamed / rebranded items: tell the report two names are one product ---------- */
+const tagOf = (r) => (r.status === 'stopped' ? ' · not bought this month' : r.status === 'new' ? ' · new this month' : '');
+
+// A searchable, alphabetically sorted list box (many items -> a plain drop-down is unusable).
+function PickList({ label, items, nameOf, value, onChange, exclude }) {
+  const [q, setQ] = useState('');
+  const sorted = useMemo(
+    () => items.filter((i) => i.key !== exclude)
+      .sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { sensitivity: 'base' })),
+    [items, exclude, nameOf],
+  );
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? sorted.filter((i) => i.key === value || nameOf(i).toLowerCase().includes(needle)) : sorted;
+  return (
+    <div className="field" style={{ flex: 1, minWidth: 240 }}>
+      <label>{label}</label>
+      <input placeholder="🔍 type to search…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 6 }} />
+      <select size={8} value={value} onChange={(e) => onChange(e.target.value)} style={{ height: 'auto' }}>
+        {shown.map((r) => <option key={r.key} value={r.key}>{nameOf(r)} /{r.unit}{tagOf(r)}</option>)}
+      </select>
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{shown.length} of {sorted.length} items · A–Z</div>
+    </div>
+  );
+}
+
 function RenamePanel({ pairs, items, nameOf, onAdd, onRemove, hint, busy }) {
   const [open, setOpen] = useState(false);
   const [oldK, setOldK] = useState('');
@@ -287,8 +321,6 @@ function RenamePanel({ pairs, items, nameOf, onAdd, onRemove, hint, busy }) {
   const o = items.find((i) => i.key === oldK);
   const n = items.find((i) => i.key === newK);
   const unitWarn = o && n && o.unit !== n.unit;
-  const tag = (r) => (r.status === 'stopped' ? ' · not bought this month' : r.status === 'new' ? ' · new this month' : '');
-  const opt = (r) => <option key={r.key} value={r.key}>{nameOf(r)} /{r.unit}{tag(r)}</option>;
   return (
     <div className="card card-pad" style={{ marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, cursor: 'pointer', flexWrap: 'wrap' }} onClick={() => setOpen(!open)}>
@@ -301,22 +333,17 @@ function RenamePanel({ pairs, items, nameOf, onAdd, onRemove, hint, busy }) {
         <div style={{ marginTop: 12 }}>
           <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
             If a product changed its name or brand, the old name shows as “not bought” and the new name as “new”, which hides the real variance.
-            Pick the <b>old name</b> and the <b>new name</b> below to treat them as one item — quantities and amounts are added together under the new name.
+            Search and click the <b>old name</b>, then the <b>new name</b>, to treat them as one item — quantities and amounts are added together under the new name.
             Your bills and ingredient list are not changed.
           </div>
-          <div className="toolbar" style={{ marginBottom: 8 }}>
-            <div className="field" style={{ flex: 1 }}><label>Old name</label>
-              <select value={oldK} onChange={(e) => setOldK(e.target.value)}>
-                <option value="">— choose —</option>
-                {items.map(opt)}
-              </select></div>
-            <div className="field" style={{ flex: 1 }}><label>New name (kept)</label>
-              <select value={newK} onChange={(e) => setNewK(e.target.value)}>
-                <option value="">— choose —</option>
-                {items.filter((i) => i.key !== oldK).map(opt)}
-              </select></div>
-            <button className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-end' }} disabled={!o || !n || busy}
+          <div className="toolbar" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
+            <PickList label="Old name" items={items} nameOf={nameOf} value={oldK} onChange={setOldK} exclude={newK} />
+            <PickList label="New name (kept)" items={items} nameOf={nameOf} value={newK} onChange={setNewK} exclude={oldK} />
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+            <button className="btn btn-primary btn-sm" disabled={!o || !n || busy}
               onClick={() => { onAdd(o, n); setOldK(''); setNewK(''); }}>Treat as same item</button>
+            <span className="muted" style={{ fontSize: 13 }}>{o ? nameOf(o) : '— old —'} <b>→</b> {n ? nameOf(n) : '— new —'}</span>
           </div>
           {unitWarn && <div style={{ fontSize: 12.5, color: 'var(--terracotta, #b4432a)', marginBottom: 8 }}>⚠ Units differ ({o.unit} vs {n.unit}) — only combine if the quantities are in the same unit.</div>}
           {pairs.length > 0 && (
